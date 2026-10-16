@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 22
       - name: Extract project files
-        run: unzip -o site-source-v4.zip -d site-source
+        run: unzip -o site-source-v5.zip -d site-source
       - name: Install dependencies
         working-directory: site-source
         run: npm ci
