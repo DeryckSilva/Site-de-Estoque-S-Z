@@ -1,5 +1,44 @@
 name: Deploy to GitHub Pages
 
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Extract project files
+        run: unzip -o site-source-v11.zip -d site-source
+      - name: Install dependencies
+        working-directory: site-source
+        run: npm ci
+      - name: Build site
+        working-directory: site-source
+        run: npm run buildname: Deploy to GitHub Pages
+
 on:
   push:
     branches: [main]
