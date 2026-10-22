@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+.live-stock-map:fullscreen {
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+.live-stock-map:fullscreen > div {
+  max-width: none;
+}

@@ -1,25 +1,29 @@
 # Mapeamento de Produção & Estoque
 
-Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas para produção.
+Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas de equipamentos para produção.
 
-## Publicação
+## Desenvolvimento local
 
-O GitHub Actions compila e publica automaticamente o site no GitHub Pages a cada atualização da branch `main`.
+Requisitos: Node.js 22 ou superior.
 
-Acesse o app: https://derycksilva.github.io/Site-de-Estoque-S-Z/
+```bash
+npm ci
+npm run dev
+```
 
-## Código-fonte
+Para testar o WMS compartilhado localmente, crie um arquivo `.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Sem essas variáveis, o app usa o armazenamento local do navegador.
 
-O projeto atualizado está em `site-source-v2.zip`. O workflow extrai o arquivo, instala as dependências com `npm ci`, compila com Vite e publica a pasta `dist`.# Mapeamento de Produção & Estoque
+## Publicação permanente no GitHub Pages
 
-Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas para produção.
+O workflow em `.github/workflows/deploy.yml` compila e publica o site automaticamente no GitHub Pages quando há um push para `main`. Também é possível iniciar a publicação manualmente pela aba **Actions**.
 
-## Publicação
+1. Envie este projeto para um repositório no GitHub.
+2. Para sincronizar o WMS entre usuários, crie um projeto Supabase e execute [`supabase/schema.sql`](./supabase/schema.sql) no SQL Editor.
+3. Em **Project Settings → API**, copie a Project URL e a chave `anon` (publicável no navegador).
+4. No GitHub, acesse **Settings → Secrets and variables → Actions → Variables** e crie `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` com esses valores.
+5. Em **Settings → Pages**, escolha **GitHub Actions** como origem; depois envie as alterações para a branch `main` ou inicie o workflow manualmente pela aba **Actions**.
+6. Acesse o endereço exibido em **Settings → Pages**.
 
-O GitHub Actions compila e publica automaticamente o site no GitHub Pages a cada atualização da branch `main`.
+O workflow compila o código deste repositório em `dist` e o hospeda no GitHub Pages; o site não depende de um computador ou túnel local ligado. Sem as variáveis Supabase, os dados continuam sendo salvos somente no navegador. Com elas, o WMS e a planta 3D compartilham os dados em tempo real.
 
-Acesse o app: https://derycksilva.github.io/Site-de-Estoque-S-Z/
-
-## Código-fonte
-
-O projeto está em `site-source.zip`. O workflow de publicação extrai o arquivo, instala as dependências com `npm ci`, compila com Vite e publica a pasta `dist`.
+**Atenção:** o acesso configurado em `supabase/schema.sql` permite que qualquer pessoa com o link público leia e altere o estoque compartilhado, sem login. Use esse modo somente se esse nível de acesso for aceitável para a empresa.

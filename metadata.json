@@ -1,0 +1,7 @@
+{
+  "name": "Mapeamento de Produção & Estoque",
+  "description": "Sistema online de mapeamento de estoque, pedidos comprometidos e entregas de equipamentos para produção com cálculo automático.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

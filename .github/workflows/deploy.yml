@@ -26,18 +26,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Extract project files
-        run: unzip -o site-source-v11.zip -d site-source
       - name: Install dependencies
-        working-directory: site-source
         run: npm ci
       - name: Build site
-        working-directory: site-source
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site-source/dist
+          path: dist
 
   deploy:
     environment:
