@@ -3,6 +3,7 @@ import type { CapturedSignature, PickupSignatureRequest } from '../types/pickupS
 
 const LOCAL_STORAGE_KEY = 'kiraso_pickup_signatures_v1';
 const SHARED_REQUEST_IDS_KEY = 'kiraso_pickup_signature_ids_v1';
+const DELETE_TOKENS_KEY = 'kiraso_pickup_signature_delete_tokens_v1';
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface SharedRequestRecord {
@@ -24,6 +25,10 @@ function isPickupSignatureRequest(value: unknown): value is PickupSignatureReque
   const request = value as Partial<PickupSignatureRequest>;
   return typeof request.id === 'string' &&
     REQUEST_ID_PATTERN.test(request.id) &&
+  (request.recordType === undefined ||
+    request.recordType === 'order' ||
+    request.recordType === 'test' ||
+    request.recordType === 'adHoc') &&
     typeof request.orderCode === 'string' &&
     typeof request.salesOrder === 'string' &&
     typeof request.customer === 'string' &&
@@ -46,6 +51,7 @@ function normalizeRequest(value: unknown): PickupSignatureRequest | null {
   if (!isPickupSignatureRequest(value)) return null;
   return {
     ...value,
+    recordType: value.recordType || 'order',
     campaignCode: value.campaignCode || value.salesOrder,
     separationDate: value.separationDate || value.pickupDate,
     observations: value.observations || '',
@@ -93,6 +99,41 @@ function rememberSharedRequestId(id: string): void {
   }
 }
 
+function readDeleteTokens(): Record<string, string> {
+  const raw = localStorage.getItem(DELETE_TOKENS_KEY);
+  if (!raw) return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('As permissões locais para apagar retiradas possuem um formato inválido.');
+  }
+  const entries = Object.entries(parsed);
+  if (!entries.every(([id, token]) => REQUEST_ID_PATTERN.test(id) && typeof token === 'string' && REQUEST_ID_PATTERN.test(token))) {
+    throw new Error('Uma permissão local para apagar retirada possui um formato inválido.');
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function rememberDeleteToken(id: string, token: string): void {
+  const tokens = readDeleteTokens();
+  tokens[id] = token;
+  localStorage.setItem(DELETE_TOKENS_KEY, JSON.stringify(tokens));
+}
+
+function forgetDeleteToken(id: string): void {
+  const tokens = readDeleteTokens();
+  delete tokens[id];
+  localStorage.setItem(DELETE_TOKENS_KEY, JSON.stringify(tokens));
+}
+
+function forgetSharedRequestId(id: string): void {
+  const ids = readSharedRequestIds().filter((requestId) => requestId !== id);
+  localStorage.setItem(SHARED_REQUEST_IDS_KEY, JSON.stringify(ids));
+}
+
+export function canDeletePickupSignature(id: string): boolean {
+  return Boolean(readDeleteTokens()[id]);
+}
+
 function decodeSharedRequestRecords(value: unknown): SharedRequestRecord[] {
   if (!Array.isArray(value)) {
     throw new Error('Os registros compartilhados de retirada possuem um formato inválido.');
@@ -135,8 +176,14 @@ export async function loadPickupSignatures(requestId?: string): Promise<PickupSi
   if (requestId && !REQUEST_ID_PATTERN.test(requestId)) {
     throw new Error('O identificador deste QR Code é inválido.');
   }
-  const ids = requestId ? [requestId] : readSharedRequestIds();
-  const records = await loadSharedRequestRecords(ids);
+  if (requestId) {
+    const records = await loadSharedRequestRecords([requestId]);
+    return records.map(({ request }) => request);
+  }
+
+  const { data, error } = await sharedPickupClient.rpc('list_pickup_signature_requests');
+  if (error) throw error;
+  const records = decodeSharedRequestRecords(data);
   return records
     .map(({ request }) => request)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -156,6 +203,9 @@ export async function savePickupSignature(
     if (signatureUpdate && (previous?.productionSignature || request.productionSignature)) {
       throw new Error('Esta retirada já foi assinada pela Produção e está disponível somente para consulta.');
     }
+    if (!signatureUpdate && !previous) {
+      rememberDeleteToken(request.id, crypto.randomUUID());
+    }
     const nextRequest = mergeRequest(previous, request, signatureUpdate);
     const next = [nextRequest, ...requests.filter((item) => item.id !== request.id)];
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
@@ -164,13 +214,20 @@ export async function savePickupSignature(
   }
 
   if (!signatureUpdate) {
+    const deleteToken = crypto.randomUUID();
+    rememberDeleteToken(request.id, deleteToken);
     rememberSharedRequestId(request.id);
     const { data, error } = await sharedPickupClient.rpc('create_pickup_signature_request', {
       p_request_id: request.id,
       p_request_data: request,
+      p_delete_token: deleteToken,
     });
-    if (error) throw error;
+    if (error) {
+      forgetDeleteToken(request.id);
+      throw error;
+    }
     if (data !== true) {
+      forgetDeleteToken(request.id);
       throw new Error('Não foi possível criar esta retirada. Gere um novo QR Code e tente novamente.');
     }
     window.dispatchEvent(new Event('kiraso_pickup_signatures_sync'));
@@ -207,6 +264,38 @@ export async function savePickupSignature(
   }
 
   throw new Error('Outra pessoa atualizou o WMS ao mesmo tempo. Recarregue a página e tente novamente.');
+}
+
+export async function deletePickupSignature(id: string): Promise<void> {
+  if (!REQUEST_ID_PATTERN.test(id)) {
+    throw new Error('O identificador desta retirada é inválido.');
+  }
+  const deleteToken = readDeleteTokens()[id];
+  if (!deleteToken) {
+    throw new Error('Esta retirada não foi gerada neste navegador após a atualização e não pode ser apagada por aqui.');
+  }
+
+  if (sharedPickupClient) {
+    const { data, error } = await sharedPickupClient.rpc('delete_pickup_signature_request', {
+      p_request_id: id,
+      p_delete_token: deleteToken,
+    });
+    if (error) throw error;
+    if (data !== true) {
+      throw new Error('Não foi possível apagar a retirada. Ela pode já ter sido removida ou não pertencer a este navegador.');
+    }
+    forgetSharedRequestId(id);
+  } else {
+    const requests = readLocalRequests();
+    const next = requests.filter((request) => request.id !== id);
+    if (next.length === requests.length) {
+      throw new Error('Retirada não encontrada neste navegador.');
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+  }
+
+  forgetDeleteToken(id);
+  window.dispatchEvent(new Event('kiraso_pickup_signatures_sync'));
 }
 
 export function watchPickupSignatures(onChange: () => void): () => void {

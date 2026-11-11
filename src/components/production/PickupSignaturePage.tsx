@@ -189,10 +189,22 @@ export function PickupSignaturePage() {
             <div className="space-y-5">
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(220px,0.65fr)]">
                 <section className="rounded-xl border border-slate-300 bg-slate-50 p-4">
-                  <h2 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-800">Dados do pedido</h2>
+                  <h2 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-800">
+                    {request.recordType === 'order' || !request.recordType ? 'Dados do pedido' : 'Dados da retirada'}
+                  </h2>
                   <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
-                    <Info label="Nº do pedido" value={request.salesOrder} />
-                    <Info label="Ordem de produção" value={request.orderCode} />
+                    {request.recordType !== 'order' && request.recordType && (
+                      <Info
+                        label="Tipo de registro"
+                        value={request.recordType === 'test' ? 'Registro de teste' : 'Saída avulsa'}
+                      />
+                    )}
+                    {(request.recordType === 'order' || !request.recordType) && (
+                      <>
+                        <Info label="Nº do pedido" value={request.salesOrder} />
+                        <Info label="Ordem de produção" value={request.orderCode} />
+                      </>
+                    )}
                     <Info label="Nome do cliente" value={request.customer} />
                     <Info label="Quantidade de equipamentos" value={String(request.equipmentQuantity)} />
                     <Info label="Quantidade de chips" value={String(request.chipQuantity)} />

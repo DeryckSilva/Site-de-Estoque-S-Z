@@ -1,16 +1,25 @@
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode, RefreshCw, Trash2 } from 'lucide-react';
 import type { ProductionOrder } from '../../types/production';
-import type { PickupSignatureRequest } from '../../types/pickupSignature';
+import type { PickupRecordType, PickupSignatureRequest } from '../../types/pickupSignature';
 import type { BaseOrder } from '../../types/orders';
 import type { EquipmentDeliveryEntry, OrderItem } from '../../types/mapping';
-import { loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
+import { canDeletePickupSignature, deletePickupSignature, loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
 import { readPanelProductionOrders } from '../../services/productionOrdersService';
 import { STORAGE_KEYS } from '../../services/productionSyncService';
 import { loadAttendedOrderNumbers, loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
 import { EQUIPMENT_ITEMS } from '../../data/initialData';
 import { sharedPickupClient } from '../../services/pickupSignatureStore';
+
+const TEST_RECORD_OPTION = '__pickup_test__';
+const AD_HOC_RECORD_OPTION = '__pickup_ad_hoc__';
+
+function getRecordTypeLabel(recordType: PickupRecordType | undefined): string {
+  if (recordType === 'test') return 'Registro de teste';
+  if (recordType === 'adHoc') return 'Saída avulsa';
+  return 'Pedido';
+}
 
 function readMappingOrders(): OrderItem[] {
   const saved = localStorage.getItem(STORAGE_KEYS.MAPPING_ORDERS);
@@ -85,7 +94,11 @@ export function PickupSignatureTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
+  const [deletingRequestId, setDeletingRequestId] = useState('');
   const [error, setError] = useState('');
+  const isTestRecord = selectedOrderId === TEST_RECORD_OPTION;
+  const isAdHocRecord = selectedOrderId === AD_HOC_RECORD_OPTION;
+  const isSpecialRecord = isTestRecord || isAdHocRecord;
 
   const refreshRequests = async () => {
     try {
@@ -201,10 +214,10 @@ export function PickupSignatureTab() {
   }, [selectedOrderId, selectedOrder?.observacoes, selectedOrder?.clienteSolicitante, selectedOrder?.totalQtd]);
 
   useEffect(() => {
-    if (!orders.some((order) => order.id === selectedOrderId)) {
+    if (!isSpecialRecord && !orders.some((order) => order.id === selectedOrderId)) {
       setSelectedOrderId(orders[0]?.id ?? '');
     }
-  }, [orders, selectedOrderId]);
+  }, [orders, selectedOrderId, isSpecialRecord]);
 
   const selectedRequest = requests.find((request) => request.id === selectedRequestId);
   const signaturePageUrl = selectedRequest && sharedPickupClient ? getSignatureUrl(selectedRequest.id) : '';
@@ -217,18 +230,21 @@ export function PickupSignatureTab() {
 
     const equipmentCount = Number(equipmentQuantity);
     const chipCount = Number(chipQuantity);
-    if (!selectedOrder || !customer.trim() || !Number.isInteger(equipmentCount) || equipmentCount <= 0 ||
+    if ((!selectedOrder && !isSpecialRecord) || !customer.trim() || !Number.isInteger(equipmentCount) || equipmentCount <= 0 ||
       !Number.isInteger(chipCount) || chipCount < 0 || !separationDate || !pickupDate) {
       setError('Confira o pedido, cliente, quantidades e as duas datas antes de gerar o QR Code.');
       return;
     }
 
     const requestId = crypto.randomUUID();
+    const recordType: PickupRecordType = isTestRecord ? 'test' : isAdHocRecord ? 'adHoc' : 'order';
+    const recordCode = selectedOrder?.pedido || (isTestRecord ? 'TESTE' : 'AVULSA');
     const request: PickupSignatureRequest = {
       id: requestId,
-      orderCode: selectedOrder.ordem,
-      salesOrder: selectedOrder.pedido,
-      campaignCode: `${selectedOrder.pedido}-${separationDate.replaceAll('-', '')}-${requestId.slice(0, 8).toUpperCase()}`,
+      recordType,
+      orderCode: selectedOrder?.ordem || (isTestRecord ? 'TESTE' : 'SAÍDA AVULSA'),
+      salesOrder: selectedOrder?.pedido || (isTestRecord ? 'REGISTRO DE TESTE' : 'SAÍDA AVULSA'),
+      campaignCode: `${recordCode}-${separationDate.replaceAll('-', '')}-${requestId.slice(0, 8).toUpperCase()}`,
       customer: customer.trim(),
       equipmentQuantity: equipmentCount,
       chipQuantity: chipCount,
@@ -250,6 +266,30 @@ export function PickupSignatureTab() {
       setError(saveError instanceof Error ? saveError.message : 'Não foi possível gerar o QR Code.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const removeRequest = async (request: PickupSignatureRequest) => {
+    if (!canDeletePickupSignature(request.id)) return;
+    const recordDescription = request.recordType === 'order' || !request.recordType
+      ? request.salesOrder
+      : request.campaignCode;
+    const confirmed = window.confirm(
+      `Apagar permanentemente ${getRecordTypeLabel(request.recordType)} ${recordDescription}? O QR Code deixará de abrir.`
+    );
+    if (!confirmed) return;
+
+    setDeletingRequestId(request.id);
+    setError('');
+    try {
+      await deletePickupSignature(request.id);
+      await refreshRequests();
+      if (selectedRequestId === request.id) setSelectedRequestId('');
+    } catch (deleteError) {
+      console.error('Falha ao apagar registro de retirada:', deleteError);
+      setError(deleteError instanceof Error ? deleteError.message : 'Não foi possível apagar o registro de retirada.');
+    } finally {
+      setDeletingRequestId('');
     }
   };
 
@@ -312,6 +352,8 @@ export function PickupSignatureTab() {
                 onChange={(event) => setSelectedOrderId(event.target.value)}
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
+                <option value={TEST_RECORD_OPTION}>Registro de teste</option>
+                <option value={AD_HOC_RECORD_OPTION}>Saída avulsa</option>
                 {orders.map((order) => (
                   <option key={order.id} value={order.id}>{order.pedido} - {order.clienteSolicitante}</option>
                 ))}
@@ -354,7 +396,7 @@ export function PickupSignatureTab() {
                 className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
             </label>
           </div>
-          <button type="button" onClick={() => void createRequest()} disabled={saving || !selectedOrder || !sharedPickupClient}
+          <button type="button" onClick={() => void createRequest()} disabled={saving || (!selectedOrder && !isSpecialRecord) || !sharedPickupClient}
             className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
             <Plus className="h-4 w-4" /> {saving ? 'Gerando...' : sharedPickupClient ? 'Gerar QR Code da retirada' : 'Configure o Supabase para gerar QR'}
           </button>
@@ -379,9 +421,13 @@ export function PickupSignatureTab() {
                 includeMargin
                 bgColor="#ffffff"
                 fgColor="#000000"
-                title={`Consulta da retirada ${selectedRequest.orderCode}`}
+                title={`Consulta da retirada ${getRecordTypeLabel(selectedRequest.recordType)} ${selectedRequest.salesOrder}`}
               />
-              <p className="mt-3 text-sm font-bold text-slate-900">{selectedRequest.orderCode}</p>
+              <p className="mt-3 text-sm font-bold text-slate-900">
+                {selectedRequest.recordType === 'order' || !selectedRequest.recordType
+                  ? selectedRequest.orderCode
+                  : getRecordTypeLabel(selectedRequest.recordType)}
+              </p>
               <p className="text-xs text-gray-600">{selectedRequest.customer} · {selectedRequest.equipmentQuantity} equipamento(s)</p>
               <p className="mt-1 text-[10px] text-gray-500">Código da campanha: {selectedRequest.campaignCode}</p>
               <p className="mt-2 break-all text-[10px] text-gray-400">{signaturePageUrl}</p>
@@ -410,12 +456,15 @@ export function PickupSignatureTab() {
           <h2 className="text-sm font-bold text-slate-900">Retiradas geradas</h2>
           <span className="text-xs text-gray-500">{loading ? 'Carregando…' : `${requests.length} registro(s)`}</span>
         </div>
+        <p className="mb-3 text-[11px] text-gray-500">
+          O botão de apagar remove o registro e invalida o QR. Retiradas criadas antes desta atualização não podem ser apagadas por aqui.
+        </p>
         {requests.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-xs">
+            <table className="w-full min-w-[900px] text-left text-xs">
               <thead className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-500">
                 <tr>
-                  <th className="py-2 pr-3 font-medium">OP / Pedido</th>
+                  <th className="py-2 pr-3 font-medium">Tipo / Pedido</th>
                   <th className="py-2 pr-3 font-medium">Cliente</th>
                   <th className="py-2 pr-3 font-medium">Retirada</th>
                   <th className="py-2 pr-3 font-medium">Código da campanha</th>
@@ -425,9 +474,17 @@ export function PickupSignatureTab() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {requests.map((request) => {
+                  const canDelete = canDeletePickupSignature(request.id);
                   return (
                     <tr key={request.id} className="text-slate-700">
-                      <td className="py-3 pr-3 font-semibold">{request.orderCode}<span className="block font-normal text-gray-500">{request.salesOrder}</span></td>
+                      <td className="py-3 pr-3 font-semibold">
+                        {getRecordTypeLabel(request.recordType)}
+                        <span className="block font-normal text-gray-500">
+                          {request.recordType === 'order' || !request.recordType
+                            ? `${request.orderCode} · ${request.salesOrder}`
+                            : request.campaignCode}
+                        </span>
+                      </td>
                       <td className="py-3 pr-3">{request.customer}</td>
                       <td className="py-3 pr-3">{request.pickupDate}</td>
                       <td className="py-3 pr-3">{request.campaignCode}</td>
@@ -444,10 +501,22 @@ export function PickupSignatureTab() {
                         )}
                       </td>
                       <td className="py-3 text-right">
-                        <button type="button" onClick={() => setSelectedRequestId(request.id)}
-                          className="rounded-md border border-gray-200 px-2.5 py-1.5 font-medium text-slate-700 hover:bg-gray-50">
-                          Ver registro
-                        </button>
+                        <div className="inline-flex items-center gap-2">
+                          <button type="button" onClick={() => setSelectedRequestId(request.id)}
+                            className="rounded-md border border-gray-200 px-2.5 py-1.5 font-medium text-slate-700 hover:bg-gray-50">
+                            Ver registro
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void removeRequest(request)}
+                            disabled={!canDelete || deletingRequestId === request.id}
+                            title={canDelete ? 'Apagar registro e invalidar o QR' : 'Disponível para retiradas geradas após esta atualização neste navegador'}
+                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deletingRequestId === request.id ? 'Apagando…' : 'Apagar'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

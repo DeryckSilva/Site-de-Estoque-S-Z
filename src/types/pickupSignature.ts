@@ -4,8 +4,11 @@ export interface CapturedSignature {
   signedAt: string;
 }
 
+export type PickupRecordType = 'order' | 'test' | 'adHoc';
+
 export interface PickupSignatureRequest {
   id: string;
+  recordType?: PickupRecordType;
   orderCode: string;
   salesOrder: string;
   campaignCode: string;

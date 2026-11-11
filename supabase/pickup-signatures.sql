@@ -2,8 +2,12 @@ create table if not exists public.pickup_signature_requests (
   id uuid primary key,
   revision bigint not null default 0,
   data jsonb not null,
+  delete_token uuid,
   updated_at timestamptz not null default now()
 );
+
+alter table public.pickup_signature_requests
+  add column if not exists delete_token uuid;
 
 alter table public.pickup_signature_requests enable row level security;
 revoke all on table public.pickup_signature_requests from public, anon, authenticated;
@@ -23,9 +27,27 @@ $$;
 revoke all on function public.get_pickup_signature_requests(uuid[]) from public;
 grant execute on function public.get_pickup_signature_requests(uuid[]) to anon, authenticated;
 
+create or replace function public.list_pickup_signature_requests()
+returns table(data jsonb, revision bigint)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select request.data, request.revision
+  from public.pickup_signature_requests as request
+  order by request.updated_at desc
+$$;
+
+revoke all on function public.list_pickup_signature_requests() from public;
+grant execute on function public.list_pickup_signature_requests() to anon, authenticated;
+
+drop function if exists public.create_pickup_signature_request(uuid, jsonb);
+
 create or replace function public.create_pickup_signature_request(
   p_request_id uuid,
-  p_request_data jsonb
+  p_request_data jsonb,
+  p_delete_token uuid
 )
 returns boolean
 language plpgsql
@@ -36,6 +58,7 @@ declare
   affected_rows integer;
 begin
   if p_request_id is null
+    or p_delete_token is null
     or jsonb_typeof(p_request_data) is distinct from 'object'
     or p_request_data ->> 'id' is distinct from p_request_id::text
     or p_request_data ? 'productionSignature'
@@ -43,8 +66,8 @@ begin
     raise exception 'Invalid pickup signature request';
   end if;
 
-  insert into public.pickup_signature_requests (id, data)
-  values (p_request_id, p_request_data)
+  insert into public.pickup_signature_requests (id, data, delete_token)
+  values (p_request_id, p_request_data, p_delete_token)
   on conflict (id) do nothing;
 
   get diagnostics affected_rows = row_count;
@@ -52,8 +75,36 @@ begin
 end;
 $$;
 
-revoke all on function public.create_pickup_signature_request(uuid, jsonb) from public;
-grant execute on function public.create_pickup_signature_request(uuid, jsonb) to anon, authenticated;
+revoke all on function public.create_pickup_signature_request(uuid, jsonb, uuid) from public;
+grant execute on function public.create_pickup_signature_request(uuid, jsonb, uuid) to anon, authenticated;
+
+create or replace function public.delete_pickup_signature_request(
+  p_request_id uuid,
+  p_delete_token uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  affected_rows integer;
+begin
+  if p_request_id is null or p_delete_token is null then
+    raise exception 'Invalid pickup signature deletion';
+  end if;
+
+  delete from public.pickup_signature_requests
+  where id = p_request_id
+    and delete_token = p_delete_token;
+
+  get diagnostics affected_rows = row_count;
+  return affected_rows = 1;
+end;
+$$;
+
+revoke all on function public.delete_pickup_signature_request(uuid, uuid) from public;
+grant execute on function public.delete_pickup_signature_request(uuid, uuid) to anon, authenticated;
 
 create or replace function public.save_pickup_signature_request(
   p_request_id uuid,

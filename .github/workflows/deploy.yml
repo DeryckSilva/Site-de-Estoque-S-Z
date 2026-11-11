@@ -33,6 +33,8 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_SHARED_WMS_URL: ${{ vars.VITE_SHARED_WMS_URL || vars.VITE_SUPABASE_URL }}
+          VITE_SHARED_WMS_ANON_KEY: ${{ vars.VITE_SHARED_WMS_ANON_KEY || vars.VITE_SUPABASE_ANON_KEY }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
