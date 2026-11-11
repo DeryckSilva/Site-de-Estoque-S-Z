@@ -9,7 +9,6 @@ const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 interface SharedRequestRecord {
   request: PickupSignatureRequest;
   revision: number;
-  canDeleteWithoutToken: boolean;
 }
 
 export interface PickupSignatureListEntry {
@@ -152,17 +151,10 @@ function decodeSharedRequestRecords(value: unknown): SharedRequestRecord[] {
       : typeof record.revision === 'string' && /^\d+$/.test(record.revision)
         ? Number(record.revision)
         : Number.NaN;
-    if ('can_delete_without_token' in record && typeof record.can_delete_without_token !== 'boolean') {
-      throw new Error('A permissão de exclusão de um registro compartilhado possui um formato inválido.');
-    }
     if (!request || !Number.isSafeInteger(revision) || revision < 0) {
       throw new Error('Um registro compartilhado de retirada possui um formato inválido.');
     }
-    return {
-      request,
-      revision,
-      canDeleteWithoutToken: record.can_delete_without_token === true,
-    };
+    return { request, revision };
   });
 }
 
@@ -184,12 +176,11 @@ export async function loadPickupSignatureList(): Promise<PickupSignatureListEntr
   const { data, error } = await sharedPickupClient.rpc('list_pickup_signature_requests');
   if (error) throw error;
 
-  const deleteTokens = readDeleteTokens();
   return decodeSharedRequestRecords(data)
     .sort((a, b) => b.request.createdAt.localeCompare(a.request.createdAt))
-    .map(({ request, canDeleteWithoutToken }) => ({
+    .map(({ request }) => ({
       request,
-      canDelete: canDeleteWithoutToken || Boolean(deleteTokens[request.id]),
+      canDelete: true,
     }));
 }
 
@@ -291,16 +282,14 @@ export async function deletePickupSignature(id: string): Promise<void> {
   if (!REQUEST_ID_PATTERN.test(id)) {
     throw new Error('O identificador desta retirada é inválido.');
   }
-  const deleteToken = readDeleteTokens()[id];
-
   if (sharedPickupClient) {
     const { data, error } = await sharedPickupClient.rpc('delete_pickup_signature_request', {
       p_request_id: id,
-      p_delete_token: deleteToken || null,
+      p_delete_token: null,
     });
     if (error) throw error;
     if (data !== true) {
-      throw new Error('Não foi possível apagar. Registros recentes só podem ser apagados no navegador que os criou.');
+      throw new Error('Não foi possível apagar. O registro pode já ter sido removido.');
     }
     forgetSharedRequestId(id);
   } else {

@@ -458,7 +458,7 @@ export function PickupSignatureTab() {
           <span className="text-xs text-gray-500">{loading ? 'Carregando…' : `${requests.length} registro(s)`}</span>
         </div>
         <p className="mb-3 text-[11px] text-gray-500">
-          Registros antigos sem token podem ser apagados por qualquer visitante. Retiradas recentes só podem ser apagadas no navegador que as criou.
+          Qualquer visitante pode apagar qualquer retirada compartilhada. A exclusão é permanente e invalida o QR Code.
         </p>
         {requests.length ? (
           <div className="overflow-x-auto">
@@ -511,7 +511,7 @@ export function PickupSignatureTab() {
                             type="button"
                             onClick={() => void removeRequest(entry)}
                             disabled={!canDelete || deletingRequestId === request.id}
-                            title={canDelete ? 'Apagar registro e invalidar o QR' : 'Esta retirada recente só pode ser apagada no navegador que a criou'}
+                            title="Apagar registro e invalidar o QR"
                             className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Trash2 className="h-3.5 w-3.5" />

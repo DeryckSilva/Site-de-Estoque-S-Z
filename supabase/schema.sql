@@ -104,11 +104,7 @@ begin
   end if;
 
   delete from public.pickup_signature_requests
-  where id = p_request_id
-    and (
-      (p_delete_token is null and delete_token is null)
-      or (p_delete_token is not null and delete_token = p_delete_token)
-    );
+  where id = p_request_id;
 
   get diagnostics affected_rows = row_count;
   return affected_rows = 1;
