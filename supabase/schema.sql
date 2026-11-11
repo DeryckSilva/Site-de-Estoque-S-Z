@@ -5,6 +5,101 @@ create table if not exists public.warehouse_state (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.pickup_signature_requests (
+  id uuid primary key,
+  revision bigint not null default 0,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.pickup_signature_requests enable row level security;
+revoke all on table public.pickup_signature_requests from public, anon, authenticated;
+
+create or replace function public.get_pickup_signature_requests(p_request_ids uuid[])
+returns table(data jsonb, revision bigint)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select request.data, request.revision
+  from public.pickup_signature_requests as request
+  where request.id = any(p_request_ids)
+$$;
+
+revoke all on function public.get_pickup_signature_requests(uuid[]) from public;
+grant execute on function public.get_pickup_signature_requests(uuid[]) to anon, authenticated;
+
+create or replace function public.create_pickup_signature_request(
+  p_request_id uuid,
+  p_request_data jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  affected_rows integer;
+begin
+  if p_request_id is null
+    or jsonb_typeof(p_request_data) is distinct from 'object'
+    or p_request_data ->> 'id' is distinct from p_request_id::text then
+    raise exception 'Invalid pickup signature request';
+  end if;
+
+  insert into public.pickup_signature_requests (id, data)
+  values (p_request_id, p_request_data)
+  on conflict (id) do nothing;
+
+  get diagnostics affected_rows = row_count;
+  return affected_rows = 1;
+end;
+$$;
+
+revoke all on function public.create_pickup_signature_request(uuid, jsonb) from public;
+grant execute on function public.create_pickup_signature_request(uuid, jsonb) to anon, authenticated;
+
+create or replace function public.save_pickup_signature_request(
+  p_request_id uuid,
+  p_expected_revision bigint,
+  p_role text,
+  p_signature jsonb
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  next_revision bigint;
+begin
+  if p_request_id is null
+    or p_expected_revision is null
+    or p_role is null
+    or p_role not in ('production', 'logistics')
+    or jsonb_typeof(p_signature) is distinct from 'object'
+    or nullif(btrim(p_signature ->> 'name'), '') is null
+    or coalesce(p_signature ->> 'image' like 'data:image/png;base64,%', false) = false
+    or nullif(btrim(p_signature ->> 'signedAt'), '') is null then
+    raise exception 'Invalid pickup signature';
+  end if;
+
+  update public.pickup_signature_requests
+  set data = jsonb_set(data, array[p_role || 'Signature'], p_signature, true),
+      revision = revision + 1,
+      updated_at = now()
+  where id = p_request_id
+    and revision = p_expected_revision
+  returning revision into next_revision;
+
+  return next_revision;
+end;
+$$;
+
+revoke all on function public.save_pickup_signature_request(uuid, bigint, text, jsonb) from public;
+grant execute on function public.save_pickup_signature_request(uuid, bigint, text, jsonb) to anon, authenticated;
+
 alter table public.warehouse_state enable row level security;
 
 drop policy if exists "Public can read shared warehouse state" on public.warehouse_state;

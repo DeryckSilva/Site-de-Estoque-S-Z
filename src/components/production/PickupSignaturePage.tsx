@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CheckCircle2, Eraser, Handshake, PackageCheck, PenLine } from 'lucide-react';
 import type { CapturedSignature, PickupSignatureRequest } from '../../types/pickupSignature';
 import { loadPickupSignatures, savePickupSignature, watchPickupSignatures, type SignatureRole } from '../../services/pickupSignatureService';
+import { sharedWmsClient } from '../../services/sharedWmsStore';
 
 function SignaturePad({ onChange }: { onChange: (image: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -113,10 +114,11 @@ export function PickupSignaturePage() {
       return;
     }
     try {
-      const requests = await loadPickupSignatures();
-      const found = requests.find((item) => item.id === requestId) ?? null;
+      const [found] = await loadPickupSignatures(requestId);
       setRequest(found);
-      setError(found ? '' : 'Retirada não encontrada. Peça à Produção para gerar um novo QR Code.');
+      setError(found ? '' : sharedWmsClient
+        ? 'Retirada não encontrada no compartilhamento. Se este QR foi criado antes da configuração, gere um novo QR Code.'
+        : 'Esta campanha foi salva apenas no navegador da Produção. Configure o Supabase e gere um novo QR Code para abri-la no celular.');
     } catch (loadError) {
       console.error('Falha ao carregar o comprovante de retirada:', loadError);
       setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar o comprovante.');
@@ -127,9 +129,7 @@ export function PickupSignaturePage() {
 
   useEffect(() => {
     void refreshRequest();
-    return watchPickupSignatures(() => void refreshRequest(), (watchError) => {
-      console.error('Falha na atualização do comprovante:', watchError);
-    });
+    return watchPickupSignatures(() => void refreshRequest());
   }, [requestId]);
 
   const signedBy = request ? signatureForRole(request, role) : undefined;

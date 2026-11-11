@@ -2,8 +2,14 @@ import { sharedWmsClient } from './sharedWmsStore';
 import type { CapturedSignature, PickupSignatureRequest } from '../types/pickupSignature';
 
 const LOCAL_STORAGE_KEY = 'kiraso_pickup_signatures_v1';
-const WMS_DATA_KEY = 'pickupSignatures';
+const SHARED_REQUEST_IDS_KEY = 'kiraso_pickup_signature_ids_v1';
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export type SignatureRole = 'production' | 'logistics';
+
+interface SharedRequestRecord {
+  request: PickupSignatureRequest;
+  revision: number;
+}
 
 function isCapturedSignature(value: unknown): value is CapturedSignature {
   if (!value || typeof value !== 'object') return false;
@@ -18,6 +24,7 @@ function isPickupSignatureRequest(value: unknown): value is PickupSignatureReque
   if (!value || typeof value !== 'object') return false;
   const request = value as Partial<PickupSignatureRequest>;
   return typeof request.id === 'string' &&
+    REQUEST_ID_PATTERN.test(request.id) &&
     typeof request.orderCode === 'string' &&
     typeof request.salesOrder === 'string' &&
     typeof request.customer === 'string' &&
@@ -73,26 +80,70 @@ function readLocalRequests(): PickupSignatureRequest[] {
   return parsed.map(normalizeRequest).filter((request): request is PickupSignatureRequest => request !== null);
 }
 
-function readSharedRequests(data: unknown): PickupSignatureRequest[] {
-  if (!data || typeof data !== 'object') return [];
-  const requests = (data as Record<string, unknown>)[WMS_DATA_KEY];
-  if (requests == null) return [];
-  if (!Array.isArray(requests)) {
-    throw new Error('Os registros compartilhados de retirada possuem um formato inválido.');
+function readSharedRequestIds(): string[] {
+  const raw = localStorage.getItem(SHARED_REQUEST_IDS_KEY);
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every((id) => typeof id === 'string' && REQUEST_ID_PATTERN.test(id))) {
+    throw new Error('O histórico local de retiradas possui um formato inválido.');
   }
-  return requests.map(normalizeRequest).filter((request): request is PickupSignatureRequest => request !== null);
+  return [...new Set(parsed)];
 }
 
-export async function loadPickupSignatures(): Promise<PickupSignatureRequest[]> {
-  if (!sharedWmsClient) return readLocalRequests();
+function rememberSharedRequestId(id: string): void {
+  const ids = readSharedRequestIds();
+  if (!ids.includes(id)) {
+    localStorage.setItem(SHARED_REQUEST_IDS_KEY, JSON.stringify([...ids, id]));
+  }
+}
 
-  const { data, error } = await sharedWmsClient
-    .from('warehouse_state')
-    .select('data')
-    .eq('id', 1)
-    .maybeSingle();
+function decodeSharedRequestRecords(value: unknown): SharedRequestRecord[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Os registros compartilhados de retirada possuem um formato inválido.');
+  }
+
+  return value.map((item) => {
+    if (!item || typeof item !== 'object') {
+      throw new Error('Um registro compartilhado de retirada possui um formato inválido.');
+    }
+    const record = item as Record<string, unknown>;
+    const request = normalizeRequest(record.data);
+    const revision = typeof record.revision === 'number'
+      ? record.revision
+      : typeof record.revision === 'string' && /^\d+$/.test(record.revision)
+        ? Number(record.revision)
+        : Number.NaN;
+    if (!request || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error('Um registro compartilhado de retirada possui um formato inválido.');
+    }
+    return { request, revision };
+  });
+}
+
+async function loadSharedRequestRecords(ids: string[]): Promise<SharedRequestRecord[]> {
+  if (!sharedWmsClient || ids.length === 0) return [];
+
+  const { data, error } = await sharedWmsClient.rpc('get_pickup_signature_requests', {
+    p_request_ids: ids,
+  });
   if (error) throw error;
-  return data ? readSharedRequests(data.data) : [];
+  return decodeSharedRequestRecords(data);
+}
+
+export async function loadPickupSignatures(requestId?: string): Promise<PickupSignatureRequest[]> {
+  if (!sharedWmsClient) {
+    const localRequests = readLocalRequests();
+    return requestId ? localRequests.filter((request) => request.id === requestId) : localRequests;
+  }
+
+  if (requestId && !REQUEST_ID_PATTERN.test(requestId)) {
+    throw new Error('O identificador deste QR Code é inválido.');
+  }
+  const ids = requestId ? [requestId] : readSharedRequestIds();
+  const records = await loadSharedRequestRecords(ids);
+  return records
+    .map(({ request }) => request)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function savePickupSignature(
@@ -113,70 +164,63 @@ export async function savePickupSignature(
     return;
   }
 
+  if (!signatureUpdate) {
+    rememberSharedRequestId(request.id);
+    const { data, error } = await sharedWmsClient.rpc('create_pickup_signature_request', {
+      p_request_id: request.id,
+      p_request_data: request,
+    });
+    if (error) throw error;
+    if (data !== true) {
+      throw new Error('Não foi possível criar esta retirada. Gere um novo QR Code e tente novamente.');
+    }
+    window.dispatchEvent(new Event('kiraso_pickup_signatures_sync'));
+    return;
+  }
+
+  if (!isCapturedSignature(signatureUpdate.value)) {
+    throw new Error('Os dados da assinatura estão incompletos ou inválidos.');
+  }
+
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { data: current, error: loadError } = await sharedWmsClient
-      .from('warehouse_state')
-      .select('data, revision')
-      .eq('id', 1)
-      .maybeSingle();
-    if (loadError) throw loadError;
+    const [current] = await loadSharedRequestRecords([request.id]);
     if (!current) {
-      throw new Error('O WMS compartilhado ainda não foi inicializado. Abra a aba WMS e tente novamente.');
+      throw new Error('Retirada não encontrada no compartilhamento. Peça à Produção para gerar um novo QR Code.');
     }
 
-    const currentData = current.data && typeof current.data === 'object'
-      ? current.data as Record<string, unknown>
-      : {};
-    const requests = readSharedRequests(currentData);
-    const previous = requests.find((item) => item.id === request.id);
-    const nextRequest = mergeRequest(previous, request, signatureUpdate);
-    const nextRequests = [nextRequest, ...requests.filter((item) => item.id !== request.id)];
-    const nextData = { ...currentData, [WMS_DATA_KEY]: nextRequests };
-    const { data: saved, error: saveError } = await sharedWmsClient
-      .from('warehouse_state')
-      .update({
-        data: nextData,
-        revision: current.revision + 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1)
-      .eq('revision', current.revision)
-      .select('revision')
-      .maybeSingle();
+    const { data: saved, error: saveError } = await sharedWmsClient.rpc('save_pickup_signature_request', {
+      p_request_id: request.id,
+      p_expected_revision: current.revision,
+      p_role: signatureUpdate.role,
+      p_signature: signatureUpdate.value,
+    });
     if (saveError) throw saveError;
-    if (saved) return;
+    if (typeof saved === 'number' && Number.isSafeInteger(saved)) {
+      window.dispatchEvent(new Event('kiraso_pickup_signatures_sync'));
+      return;
+    }
+    if (saved !== null) {
+      throw new Error('O Supabase retornou uma resposta inválida ao salvar a assinatura.');
+    }
   }
 
   throw new Error('Outra pessoa atualizou o WMS ao mesmo tempo. Recarregue a página e tente novamente.');
 }
 
-export function watchPickupSignatures(onChange: () => void, onError: (error: unknown) => void): () => void {
-  const client = sharedWmsClient;
-  if (!client) {
-    const refresh = () => onChange();
-    window.addEventListener('storage', refresh);
-    window.addEventListener('kiraso_pickup_signatures_sync', refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('kiraso_pickup_signatures_sync', refresh);
-    };
-  }
-
-  const channel = client
-    .channel('pickup-signatures-live')
-    .on('postgres_changes', {
-      event: 'UPDATE',
-      schema: 'public',
-      table: 'warehouse_state',
-      filter: 'id=eq.1',
-    }, () => onChange())
-    .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        onError(new Error('A atualização em tempo real das assinaturas está indisponível.'));
-      }
-    });
-
+export function watchPickupSignatures(onChange: () => void): () => void {
+  const refresh = () => onChange();
+  window.addEventListener('storage', refresh);
+  window.addEventListener('kiraso_pickup_signatures_sync', refresh);
+  window.addEventListener('focus', refresh);
+  const interval = sharedWmsClient
+    ? window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, 15_000)
+    : undefined;
   return () => {
-    void client.removeChannel(channel);
+    window.removeEventListener('storage', refresh);
+    window.removeEventListener('kiraso_pickup_signatures_sync', refresh);
+    window.removeEventListener('focus', refresh);
+    if (interval !== undefined) window.clearInterval(interval);
   };
 }

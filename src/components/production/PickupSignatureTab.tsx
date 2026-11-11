@@ -5,6 +5,7 @@ import type { ProductionOrder } from '../../types/production';
 import type { PickupSignatureRequest } from '../../types/pickupSignature';
 import { loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
 import { readPanelProductionOrders } from '../../services/productionOrdersService';
+import { sharedWmsClient } from '../../services/sharedWmsStore';
 
 function today(): string {
   const date = new Date();
@@ -55,9 +56,7 @@ export function PickupSignatureTab() {
     window.addEventListener('storage', refreshOrders);
     window.addEventListener('kiraso_orders_sync', refreshOrders);
     window.addEventListener('kiraso_mapping_state_sync', refreshOrders);
-    const stopWatching = watchPickupSignatures(() => void refreshRequests(), (watchError) => {
-      console.error('Falha na atualização das assinaturas:', watchError);
-    });
+    const stopWatching = watchPickupSignatures(() => void refreshRequests());
     return () => {
       window.removeEventListener('storage', refreshOrders);
       window.removeEventListener('kiraso_orders_sync', refreshOrders);
@@ -82,6 +81,11 @@ export function PickupSignatureTab() {
   const signaturePageUrl = selectedRequest ? getSignatureUrl(selectedRequest.id) : '';
 
   const createRequest = async () => {
+    if (!sharedWmsClient) {
+      setError('O compartilhamento Supabase não está configurado neste site. Configure-o e publique novamente antes de gerar um QR para celular.');
+      return;
+    }
+
     const equipmentCount = Number(equipmentQuantity);
     const chipCount = Number(chipQuantity);
     if (!selectedOrder || !customer.trim() || !Number.isInteger(equipmentCount) || equipmentCount <= 0 ||
@@ -144,10 +148,10 @@ export function PickupSignatureTab() {
         </div>
       )}
 
-      {!import.meta.env.VITE_SUPABASE_URL && (
+      {!sharedWmsClient && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Modo local: os pedidos e assinaturas ficam somente neste navegador. Configure o Supabase para compartilhar o QR e as assinaturas com outros dispositivos.</span>
+          <span>O Supabase compartilhado não está configurado neste site. As campanhas ficam neste navegador e não abrem pelo QR em outros dispositivos. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no GitHub e publique novamente.</span>
         </div>
       )}
 
@@ -207,9 +211,9 @@ export function PickupSignatureTab() {
                 className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
             </label>
           </div>
-          <button type="button" onClick={() => void createRequest()} disabled={saving || !selectedOrder}
+          <button type="button" onClick={() => void createRequest()} disabled={saving || !selectedOrder || !sharedWmsClient}
             className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
-            <Plus className="h-4 w-4" /> {saving ? 'Gerando...' : 'Gerar QR Code da retirada'}
+            <Plus className="h-4 w-4" /> {saving ? 'Gerando...' : sharedWmsClient ? 'Gerar QR Code da retirada' : 'Configure o Supabase para gerar QR'}
           </button>
         </section>
 
