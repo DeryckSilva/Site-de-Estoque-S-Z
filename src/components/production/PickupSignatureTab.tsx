@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode, RefreshCw, Search, Trash2 } from 'lucide-react';
 import type { ProductionOrder } from '../../types/production';
 import type { PickupRecordType, PickupSignatureRequest } from '../../types/pickupSignature';
 import type { BaseOrder } from '../../types/orders';
@@ -20,6 +20,10 @@ function getRecordTypeLabel(recordType: PickupRecordType | undefined): string {
   if (recordType === 'test') return 'Registro de teste';
   if (recordType === 'adHoc') return 'Saída avulsa';
   return 'Pedido';
+}
+
+function normalizePickupFilter(value: string): string {
+  return value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function readMappingOrders(): OrderItem[] {
@@ -92,6 +96,7 @@ export function PickupSignatureTab() {
   const [observations, setObservations] = useState(selectedOrder?.observacoes ?? '');
   const [requests, setRequests] = useState<PickupSignatureListEntry[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState('');
+  const [filterText, setFilterText] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
@@ -222,6 +227,27 @@ export function PickupSignatureTab() {
 
   const selectedRequest = requests.find(({ request }) => request.id === selectedRequestId)?.request;
   const signaturePageUrl = selectedRequest && sharedPickupClient ? getSignatureUrl(selectedRequest.id) : '';
+  const normalizedFilter = normalizePickupFilter(filterText.trim());
+  const filteredRequests = requests.filter(({ request }) => {
+    const searchableText = [
+      getRecordTypeLabel(request.recordType),
+      request.orderCode,
+      request.salesOrder,
+      request.campaignCode,
+      request.customer,
+      request.pickupDate,
+      request.separationDate,
+      request.observations,
+      request.productionSignature?.name,
+      request.productionSignature?.signedAt,
+      request.productionSignature ? 'Assinado' : 'Pendente',
+      request.equipmentQuantity,
+      request.chipQuantity,
+      request.batteryType,
+    ].join(' ');
+    const normalizedSearchableText = normalizePickupFilter(searchableText);
+    return normalizedSearchableText.includes(normalizedFilter);
+  });
 
   const createRequest = async () => {
     if (!sharedPickupClient) {
@@ -455,17 +481,46 @@ export function PickupSignatureTab() {
       <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-sm font-bold text-slate-900">Retiradas geradas</h2>
-          <span className="text-xs text-gray-500">{loading ? 'Carregando…' : `${requests.length} registro(s)`}</span>
+          <span className="text-xs text-gray-500">
+            {loading ? 'Carregando…' : filterText.trim()
+              ? `${filteredRequests.length} de ${requests.length} registro(s)`
+              : `${requests.length} registro(s)`}
+          </span>
         </div>
         <p className="mb-3 text-[11px] text-gray-500">
           Qualquer visitante pode apagar qualquer retirada compartilhada. A exclusão é permanente e invalida o QR Code.
         </p>
-        {requests.length ? (
+        {requests.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <label htmlFor="pickup-signature-filter" className="sr-only">Filtrar retiradas</label>
+            <div className="relative min-w-[240px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                id="pickup-signature-filter"
+                type="search"
+                value={filterText}
+                onChange={(event) => setFilterText(event.target.value)}
+                placeholder="Filtrar por cliente, pedido, campanha ou assinatura"
+                className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-xs outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+            </div>
+            {filterText && (
+              <button
+                type="button"
+                onClick={() => setFilterText('')}
+                className="rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-gray-50"
+              >
+                Limpar filtro
+              </button>
+            )}
+          </div>
+        )}
+        {filteredRequests.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-left text-xs">
               <thead className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-500">
                 <tr>
-                  <th className="py-2 pr-3 font-medium">Tipo / Pedido</th>
+                  <th className="py-2 pr-3 font-medium">Nº do pedido / código</th>
                   <th className="py-2 pr-3 font-medium">Cliente</th>
                   <th className="py-2 pr-3 font-medium">Retirada</th>
                   <th className="py-2 pr-3 font-medium">Código da campanha</th>
@@ -474,17 +529,14 @@ export function PickupSignatureTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {requests.map((entry) => {
+                {filteredRequests.map((entry) => {
                   const { request, canDelete } = entry;
                   return (
                     <tr key={request.id} className="text-slate-700">
                       <td className="py-3 pr-3 font-semibold">
-                        {getRecordTypeLabel(request.recordType)}
-                        <span className="block font-normal text-gray-500">
-                          {request.recordType === 'order' || !request.recordType
-                            ? `${request.orderCode} · ${request.salesOrder}`
-                            : request.campaignCode}
-                        </span>
+                        {request.recordType === 'order' || !request.recordType
+                          ? request.salesOrder
+                          : request.campaignCode}
                       </td>
                       <td className="py-3 pr-3">{request.customer}</td>
                       <td className="py-3 pr-3">{request.pickupDate}</td>
@@ -525,6 +577,10 @@ export function PickupSignatureTab() {
               </tbody>
             </table>
           </div>
+        ) : requests.length > 0 ? (
+          <p className="rounded-lg border border-dashed border-gray-200 py-8 text-center text-xs text-gray-500">
+            Nenhuma retirada corresponde ao filtro.
+          </p>
         ) : (
           <p className="rounded-lg border border-dashed border-gray-200 py-8 text-center text-xs text-gray-500">
             Nenhum QR Code gerado ainda.
