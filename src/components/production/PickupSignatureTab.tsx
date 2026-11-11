@@ -220,7 +220,7 @@ export function PickupSignatureTab() {
     }
   }, [orders, selectedOrderId, isSpecialRecord]);
 
-  const selectedRequest = requests.find((request) => request.id === selectedRequestId);
+  const selectedRequest = requests.find(({ request }) => request.id === selectedRequestId)?.request;
   const signaturePageUrl = selectedRequest && sharedPickupClient ? getSignatureUrl(selectedRequest.id) : '';
 
   const createRequest = async () => {
