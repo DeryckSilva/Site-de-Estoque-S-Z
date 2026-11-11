@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, CalendarDays, CheckCircle2, ClipboardList, Package, RefreshCw, Search, TriangleAlert } from 'lucide-react';
 import type { PickupSignatureRequest } from '../../types/pickupSignature';
 import { loadPickupSignatureList, watchPickupSignatures } from '../../services/pickupSignatureService';
@@ -35,8 +35,10 @@ export function PickupKioskTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const refreshSequence = useRef(0);
 
   const refreshRequests = async () => {
+    const requestSequence = ++refreshSequence.current;
     if (!sharedPickupClient) {
       setRequests([]);
       setError('O painel do tablet precisa da conexão compartilhada para carregar os pedidos. Avise o responsável pelo sistema.');
@@ -48,20 +50,30 @@ export function PickupKioskTab() {
     setRefreshing(true);
     try {
       const entries = await loadPickupSignatureList();
-      setRequests(entries.map(({ request }) => request));
-      setError('');
+      if (requestSequence === refreshSequence.current) {
+        setRequests(entries.map(({ request }) => request));
+        setError('');
+      }
     } catch (loadError) {
       console.error('Falha ao carregar pedidos para retirada pelo tablet:', loadError);
-      setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar os pedidos para retirada.');
+      if (requestSequence === refreshSequence.current) {
+        setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar os pedidos para retirada.');
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestSequence === refreshSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
     void refreshRequests();
-    return watchPickupSignatures(() => void refreshRequests());
+    const unwatch = watchPickupSignatures(() => void refreshRequests());
+    return () => {
+      refreshSequence.current += 1;
+      unwatch();
+    };
   }, []);
 
   const pendingRequests = useMemo(
