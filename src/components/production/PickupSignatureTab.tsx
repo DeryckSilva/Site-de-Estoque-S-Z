@@ -1,11 +1,54 @@
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode, RefreshCw } from 'lucide-react';
 import type { ProductionOrder } from '../../types/production';
 import type { PickupSignatureRequest } from '../../types/pickupSignature';
+import type { BaseOrder } from '../../types/orders';
+import type { EquipmentDeliveryEntry, OrderItem } from '../../types/mapping';
 import { loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
 import { readPanelProductionOrders } from '../../services/productionOrdersService';
+import { STORAGE_KEYS } from '../../services/productionSyncService';
+import { loadAttendedOrderNumbers, loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
+import { EQUIPMENT_ITEMS } from '../../data/initialData';
 import { sharedPickupClient } from '../../services/pickupSignatureStore';
+
+function readMappingOrders(): OrderItem[] {
+  const saved = localStorage.getItem(STORAGE_KEYS.MAPPING_ORDERS);
+  if (!saved) return [];
+
+  const parsed: unknown = JSON.parse(saved);
+  if (!Array.isArray(parsed)) {
+    throw new Error('A lista de pedidos do Mapeamento possui um formato inválido.');
+  }
+  return parsed as OrderItem[];
+}
+
+function toMappingOrder(source: BaseOrder, existing?: OrderItem): OrderItem {
+  return {
+    ...existing,
+    id: existing?.id || `sheet-${source.id}`,
+    numPed: source.numPedido,
+    cliente: source.cliente,
+    quantidade: source.quantidade,
+    itemId: source.mappedItemId,
+    dataEnvio: source.dataEnvio,
+    dataSolicitacao: source.dataSolicitacao,
+    cnpj: source.cnpj,
+    comercial: source.comercial,
+    contrato: source.contrato,
+    tipoEntrega: source.tipoEntrega,
+    tipoItem: source.tipoItem,
+    operadora: source.operadora,
+    geracao: source.geracao,
+    modeloVariacao: source.modeloVariacao,
+    corVariacao: source.corVariacao,
+    carregador: source.carregador,
+    quantidadeCarregador: source.quantidadeCarregador,
+    modeloDesc: `${source.geracao || ''} ${source.modeloVariacao || ''}`.trim(),
+    tipoNegocio: source.tipoNegocio,
+    observacao: source.observacao,
+  };
+}
 
 function today(): string {
   const date = new Date();
@@ -41,6 +84,7 @@ export function PickupSignatureTab() {
   const [selectedRequestId, setSelectedRequestId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
   const [error, setError] = useState('');
 
   const refreshRequests = async () => {
@@ -52,6 +96,86 @@ export function PickupSignatureTab() {
       setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar as solicitações de assinatura.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshOrders = async () => {
+    setIsRefreshingOrders(true);
+    setError('');
+    try {
+      const [sheetOrders, attendedNumbers] = await Promise.all([
+        loadOrdersFromGoogleSheet(),
+        loadAttendedOrderNumbers(),
+      ]);
+      const currentMappingOrders = readMappingOrders();
+      const currentByNumber = new Map(
+        currentMappingOrders.map((order) => [order.numPed.trim().toLowerCase(), order])
+      );
+      const refreshedOrders = sheetOrders
+        .filter((source) => !attendedNumbers.has(source.numPedido.trim().toLowerCase()))
+        .map((source) =>
+          toMappingOrder(source, currentByNumber.get(source.numPedido.trim().toLowerCase()))
+        );
+      const refreshedNumbers = new Set(
+        refreshedOrders.map((order) => order.numPed.trim().toLowerCase())
+      );
+      const manualOrders = currentMappingOrders.filter((order) =>
+        order.id.startsWith('ord-') && !refreshedNumbers.has(order.numPed.trim().toLowerCase())
+      );
+      const nextMappingOrders = [...refreshedOrders, ...manualOrders];
+      const previousOrders = readPanelProductionOrders();
+      const previousByNumber = new Map(
+        previousOrders.map((order) => [order.pedido.toLowerCase(), order])
+      );
+      const rawDeliveries = localStorage.getItem(STORAGE_KEYS.MAPPING_DELIVERIES);
+      const deliveries = rawDeliveries
+        ? JSON.parse(rawDeliveries) as EquipmentDeliveryEntry[]
+        : [];
+      const updatedOrders = nextMappingOrders.map((mappedOrder): ProductionOrder => {
+        const previousOrder = previousByNumber.get(mappedOrder.numPed.toLowerCase());
+        const delivered = deliveries
+          .filter((delivery) =>
+            delivery.linkedOrderId === mappedOrder.id ||
+            delivery.linkedOrderNumber?.toLowerCase() === mappedOrder.numPed.toLowerCase() ||
+            (delivery.destinoOuPedido || '').toLowerCase().includes(mappedOrder.numPed.toLowerCase())
+          )
+          .reduce((sum, delivery) => sum + (Number(delivery.quantidade) || 0), 0);
+        const total = Number(mappedOrder.quantidade) || 0;
+        const destined = delivered || mappedOrder.destinadoProducao || 0;
+
+        return {
+          id: previousOrder?.id || `op-${mappedOrder.id}`,
+          prioridade: previousOrder?.prioridade || 'Padrão',
+          ordem: previousOrder?.ordem || `OP-${mappedOrder.numPed}`,
+          origem: previousOrder?.origem || 'Pedido de Venda',
+          tipoOrigemBadge: previousOrder?.tipoOrigemBadge || mappedOrder.tipoNegocio || 'Pedido',
+          clienteSolicitante: mappedOrder.cliente,
+          pedido: mappedOrder.numPed,
+          itemModel: mappedOrder.modeloDesc ||
+            EQUIPMENT_ITEMS.find((item) => item.id === mappedOrder.itemId)?.name ||
+            mappedOrder.itemId,
+          produzido: Math.min(previousOrder?.produzido || 0, total),
+          falta: Math.max(0, total - (previousOrder?.produzido || 0)),
+          totalQtd: total,
+          destinado: Math.min(total, destined),
+          dataCriacao: previousOrder?.dataCriacao || mappedOrder.dataEnvio || '',
+          status: 'A atender',
+          bancada: previousOrder?.bancada || 'Bancada 01',
+          observacoes: mappedOrder.observacao || previousOrder?.observacoes,
+        };
+      });
+
+      localStorage.setItem(STORAGE_KEYS.MAPPING_ORDERS, JSON.stringify(nextMappingOrders));
+      localStorage.setItem(STORAGE_KEYS.PENDING_OPS, JSON.stringify(updatedOrders));
+      setOrders(updatedOrders);
+      window.dispatchEvent(new CustomEvent('kiraso_mapping_sync'));
+      window.dispatchEvent(new CustomEvent('kiraso_mapping_state_sync'));
+      window.dispatchEvent(new CustomEvent('kiraso_orders_sync', { detail: { updatedOps: updatedOrders } }));
+    } catch (refreshError) {
+      console.error('Falha ao atualizar pedidos para a assinatura da retirada:', refreshError);
+      setError('Não foi possível atualizar os pedidos. Verifique o acesso às planilhas.');
+    } finally {
+      setIsRefreshingOrders(false);
     }
   };
 
@@ -167,18 +291,32 @@ export function PickupSignatureTab() {
             <h2 className="text-sm font-bold text-slate-900">Dados do pedido e retirada</h2>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1.5 text-xs font-medium text-slate-700 sm:col-span-2">
-              Pedido do Painel de Pedidos
+            <div className="space-y-1.5 sm:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor="pickup-order" className="text-xs font-medium text-slate-700">
+                  Pedido do Painel de Pedidos
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void refreshOrders()}
+                  disabled={isRefreshingOrders}
+                  className="inline-flex items-center gap-1 rounded bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingOrders ? 'animate-spin' : ''}`} />
+                  {isRefreshingOrders ? 'Atualizando...' : 'Atualizar pedidos'}
+                </button>
+              </div>
               <select
+                id="pickup-order"
                 value={selectedOrderId}
                 onChange={(event) => setSelectedOrderId(event.target.value)}
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
               >
                 {orders.map((order) => (
-                  <option key={order.id} value={order.id}>{order.ordem} · {order.pedido} · {order.itemModel}</option>
+                  <option key={order.id} value={order.id}>{order.pedido} - {order.clienteSolicitante}</option>
                 ))}
               </select>
-            </label>
+            </div>
             <label className="space-y-1.5 text-xs font-medium text-slate-700 sm:col-span-2">
               Nome do cliente
               <input value={customer} onChange={(event) => setCustomer(event.target.value)} required
