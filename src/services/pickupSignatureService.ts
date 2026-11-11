@@ -9,6 +9,12 @@ const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 interface SharedRequestRecord {
   request: PickupSignatureRequest;
   revision: number;
+  canDeleteWithoutToken: boolean;
+}
+
+export interface PickupSignatureListEntry {
+  request: PickupSignatureRequest;
+  canDelete: boolean;
 }
 
 function isCapturedSignature(value: unknown): value is CapturedSignature {
@@ -130,10 +136,6 @@ function forgetSharedRequestId(id: string): void {
   localStorage.setItem(SHARED_REQUEST_IDS_KEY, JSON.stringify(ids));
 }
 
-export function canDeletePickupSignature(id: string): boolean {
-  return Boolean(readDeleteTokens()[id]);
-}
-
 function decodeSharedRequestRecords(value: unknown): SharedRequestRecord[] {
   if (!Array.isArray(value)) {
     throw new Error('Os registros compartilhados de retirada possuem um formato inválido.');
@@ -150,10 +152,17 @@ function decodeSharedRequestRecords(value: unknown): SharedRequestRecord[] {
       : typeof record.revision === 'string' && /^\d+$/.test(record.revision)
         ? Number(record.revision)
         : Number.NaN;
+    if ('can_delete_without_token' in record && typeof record.can_delete_without_token !== 'boolean') {
+      throw new Error('A permissão de exclusão de um registro compartilhado possui um formato inválido.');
+    }
     if (!request || !Number.isSafeInteger(revision) || revision < 0) {
       throw new Error('Um registro compartilhado de retirada possui um formato inválido.');
     }
-    return { request, revision };
+    return {
+      request,
+      revision,
+      canDeleteWithoutToken: record.can_delete_without_token === true,
+    };
   });
 }
 
@@ -165,6 +174,23 @@ async function loadSharedRequestRecords(ids: string[]): Promise<SharedRequestRec
   });
   if (error) throw error;
   return decodeSharedRequestRecords(data);
+}
+
+export async function loadPickupSignatureList(): Promise<PickupSignatureListEntry[]> {
+  if (!sharedPickupClient) {
+    return readLocalRequests().map((request) => ({ request, canDelete: true }));
+  }
+
+  const { data, error } = await sharedPickupClient.rpc('list_pickup_signature_requests');
+  if (error) throw error;
+
+  const deleteTokens = readDeleteTokens();
+  return decodeSharedRequestRecords(data)
+    .sort((a, b) => b.request.createdAt.localeCompare(a.request.createdAt))
+    .map(({ request, canDeleteWithoutToken }) => ({
+      request,
+      canDelete: canDeleteWithoutToken || Boolean(deleteTokens[request.id]),
+    }));
 }
 
 export async function loadPickupSignatures(requestId?: string): Promise<PickupSignatureRequest[]> {
@@ -181,12 +207,7 @@ export async function loadPickupSignatures(requestId?: string): Promise<PickupSi
     return records.map(({ request }) => request);
   }
 
-  const { data, error } = await sharedPickupClient.rpc('list_pickup_signature_requests');
-  if (error) throw error;
-  const records = decodeSharedRequestRecords(data);
-  return records
-    .map(({ request }) => request)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (await loadPickupSignatureList()).map(({ request }) => request);
 }
 
 export async function savePickupSignature(
@@ -271,18 +292,15 @@ export async function deletePickupSignature(id: string): Promise<void> {
     throw new Error('O identificador desta retirada é inválido.');
   }
   const deleteToken = readDeleteTokens()[id];
-  if (!deleteToken) {
-    throw new Error('Esta retirada não foi gerada neste navegador após a atualização e não pode ser apagada por aqui.');
-  }
 
   if (sharedPickupClient) {
     const { data, error } = await sharedPickupClient.rpc('delete_pickup_signature_request', {
       p_request_id: id,
-      p_delete_token: deleteToken,
+      p_delete_token: deleteToken || null,
     });
     if (error) throw error;
     if (data !== true) {
-      throw new Error('Não foi possível apagar a retirada. Ela pode já ter sido removida ou não pertencer a este navegador.');
+      throw new Error('Não foi possível apagar. Registros recentes só podem ser apagados no navegador que os criou.');
     }
     forgetSharedRequestId(id);
   } else {

@@ -34,14 +34,16 @@ $$;
 revoke all on function public.get_pickup_signature_requests(uuid[]) from public;
 grant execute on function public.get_pickup_signature_requests(uuid[]) to anon, authenticated;
 
+drop function if exists public.list_pickup_signature_requests();
+
 create or replace function public.list_pickup_signature_requests()
-returns table(data jsonb, revision bigint)
+returns table(data jsonb, revision bigint, can_delete_without_token boolean)
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select request.data, request.revision
+  select request.data, request.revision, request.delete_token is null
   from public.pickup_signature_requests as request
   order by request.updated_at desc
 $$;
@@ -97,13 +99,16 @@ as $$
 declare
   affected_rows integer;
 begin
-  if p_request_id is null or p_delete_token is null then
+  if p_request_id is null then
     raise exception 'Invalid pickup signature deletion';
   end if;
 
   delete from public.pickup_signature_requests
   where id = p_request_id
-    and delete_token = p_delete_token;
+    and (
+      (p_delete_token is null and delete_token is null)
+      or (p_delete_token is not null and delete_token = p_delete_token)
+    );
 
   get diagnostics affected_rows = row_count;
   return affected_rows = 1;

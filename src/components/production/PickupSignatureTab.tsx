@@ -5,7 +5,8 @@ import type { ProductionOrder } from '../../types/production';
 import type { PickupRecordType, PickupSignatureRequest } from '../../types/pickupSignature';
 import type { BaseOrder } from '../../types/orders';
 import type { EquipmentDeliveryEntry, OrderItem } from '../../types/mapping';
-import { canDeletePickupSignature, deletePickupSignature, loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
+import { deletePickupSignature, loadPickupSignatureList, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
+import type { PickupSignatureListEntry } from '../../services/pickupSignatureService';
 import { readPanelProductionOrders } from '../../services/productionOrdersService';
 import { STORAGE_KEYS } from '../../services/productionSyncService';
 import { loadAttendedOrderNumbers, loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
@@ -89,7 +90,7 @@ export function PickupSignatureTab() {
   const [separationDate, setSeparationDate] = useState(today);
   const [pickupDate, setPickupDate] = useState(today);
   const [observations, setObservations] = useState(selectedOrder?.observacoes ?? '');
-  const [requests, setRequests] = useState<PickupSignatureRequest[]>([]);
+  const [requests, setRequests] = useState<PickupSignatureListEntry[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -102,7 +103,7 @@ export function PickupSignatureTab() {
 
   const refreshRequests = async () => {
     try {
-      setRequests(await loadPickupSignatures());
+      setRequests(await loadPickupSignatureList());
       setError('');
     } catch (loadError) {
       console.error('Falha ao carregar solicitações de assinatura:', loadError);
@@ -269,8 +270,8 @@ export function PickupSignatureTab() {
     }
   };
 
-  const removeRequest = async (request: PickupSignatureRequest) => {
-    if (!canDeletePickupSignature(request.id)) return;
+  const removeRequest = async ({ request, canDelete }: PickupSignatureListEntry) => {
+    if (!canDelete) return;
     const recordDescription = request.recordType === 'order' || !request.recordType
       ? request.salesOrder
       : request.campaignCode;
@@ -457,7 +458,7 @@ export function PickupSignatureTab() {
           <span className="text-xs text-gray-500">{loading ? 'Carregando…' : `${requests.length} registro(s)`}</span>
         </div>
         <p className="mb-3 text-[11px] text-gray-500">
-          O botão de apagar remove o registro e invalida o QR. Retiradas criadas antes desta atualização não podem ser apagadas por aqui.
+          Registros antigos sem token podem ser apagados por qualquer visitante. Retiradas recentes só podem ser apagadas no navegador que as criou.
         </p>
         {requests.length ? (
           <div className="overflow-x-auto">
@@ -473,8 +474,8 @@ export function PickupSignatureTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {requests.map((request) => {
-                  const canDelete = canDeletePickupSignature(request.id);
+                {requests.map((entry) => {
+                  const { request, canDelete } = entry;
                   return (
                     <tr key={request.id} className="text-slate-700">
                       <td className="py-3 pr-3 font-semibold">
@@ -508,9 +509,9 @@ export function PickupSignatureTab() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void removeRequest(request)}
+                            onClick={() => void removeRequest(entry)}
                             disabled={!canDelete || deletingRequestId === request.id}
-                            title={canDelete ? 'Apagar registro e invalidar o QR' : 'Disponível para retiradas geradas após esta atualização neste navegador'}
+                            title={canDelete ? 'Apagar registro e invalidar o QR' : 'Esta retirada recente só pode ser apagada no navegador que a criou'}
                             className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Trash2 className="h-3.5 w-3.5" />

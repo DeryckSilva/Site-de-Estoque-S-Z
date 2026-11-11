@@ -30,6 +30,6 @@ As assinaturas usam uma tabela separada. O acesso direto a ela é bloqueado; as 
 
 O acesso ao QR é público por UUID: qualquer pessoa com o link pode consultar a campanha pendente e tentar registrar a única assinatura da Produção; após a assinatura, o banco rejeita novas assinaturas. Não há login. A lista compartilhada de retiradas também fica visível para visitantes do site.
 
-O script `pickup-signatures.sql` também habilita a lista compartilhada de retiradas e a exclusão permanente de retiradas recém-criadas com um token privado mantido somente no navegador da Produção. O token não faz parte do QR; retiradas criadas antes dessa alteração não podem ser apagadas por esse botão.
+O script `pickup-signatures.sql` também habilita a lista compartilhada de retiradas e a exclusão permanente. Retiradas recentes usam um token privado mantido somente no navegador que as criou; registros antigos, sem token, podem ser apagados por qualquer visitante. O token não faz parte do QR.
 
 **Atenção:** `supabase/schema.sql` configura `warehouse_state` e a lista de retiradas para leitura e alteração públicas, sem login. Qualquer pessoa com acesso ao site pode consultar e modificar o estoque, as movimentações e os registros de retirada. Execute o schema completo somente se esse nível de acesso for aceitável para a empresa.
