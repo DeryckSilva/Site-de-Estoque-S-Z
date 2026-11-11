@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CheckCircle2, Eraser, Handshake, PackageCheck, PenLine } from 'lucide-react';
 import type { CapturedSignature, PickupSignatureRequest } from '../../types/pickupSignature';
-import { loadPickupSignatures, savePickupSignature, watchPickupSignatures, type SignatureRole } from '../../services/pickupSignatureService';
-import { sharedWmsClient } from '../../services/sharedWmsStore';
+import { loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
+import { sharedPickupClient } from '../../services/pickupSignatureStore';
 
 function SignaturePad({ onChange }: { onChange: (image: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -91,8 +91,9 @@ function formatDate(date: string): string {
   return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString('pt-BR');
 }
 
-function signatureForRole(request: PickupSignatureRequest, role: SignatureRole): CapturedSignature | undefined {
-  return role === 'production' ? request.productionSignature : request.logisticsSignature;
+function formatDateTime(date: string): string {
+  const parsed = new Date(date);
+  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleString('pt-BR');
 }
 
 export function PickupSignaturePage() {
@@ -101,9 +102,7 @@ export function PickupSignaturePage() {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [image, setImage] = useState('');
-  const [role, setRole] = useState<SignatureRole>('production');
   const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -116,7 +115,7 @@ export function PickupSignaturePage() {
     try {
       const [found] = await loadPickupSignatures(requestId);
       setRequest(found);
-      setError(found ? '' : sharedWmsClient
+      setError(found ? '' : sharedPickupClient
         ? 'Retirada não encontrada no compartilhamento. Se este QR foi criado antes da configuração, gere um novo QR Code.'
         : 'Esta campanha foi salva apenas no navegador da Produção. Configure o Supabase e gere um novo QR Code para abri-la no celular.');
     } catch (loadError) {
@@ -132,9 +131,11 @@ export function PickupSignaturePage() {
     return watchPickupSignatures(() => void refreshRequest());
   }, [requestId]);
 
-  const signedBy = request ? signatureForRole(request, role) : undefined;
-
   const submitSignature = async () => {
+    if (request?.productionSignature) {
+      setError('Esta retirada já foi assinada pela Produção e está disponível somente para consulta.');
+      return;
+    }
     if (!request || !name.trim() || !image) {
       setError('Informe seu nome e desenhe sua assinatura antes de confirmar.');
       return;
@@ -148,26 +149,16 @@ export function PickupSignaturePage() {
     setError('');
     setSuccess('');
     try {
-      await savePickupSignature(request, { role, value: captured });
+      await savePickupSignature(request, captured);
       await refreshRequest();
-      setEditing(false);
       setImage('');
-      setSuccess('Assinatura registrada com sucesso.');
+      setSuccess('Assinatura registrada. Este QR Code agora está disponível somente para consulta.');
     } catch (saveError) {
       console.error('Falha ao salvar assinatura da retirada:', saveError);
       setError(saveError instanceof Error ? saveError.message : 'Não foi possível salvar a assinatura. Tente novamente.');
     } finally {
       setSaving(false);
     }
-  };
-
-  const chooseRole = (nextRole: SignatureRole) => {
-    setRole(nextRole);
-    setName('');
-    setImage('');
-    setEditing(false);
-    setError('');
-    setSuccess('');
   };
 
   return (
@@ -185,7 +176,7 @@ export function PickupSignaturePage() {
           </div>
           <div className="text-right">
             <h1 className="text-sm font-extrabold uppercase tracking-wide text-slate-800 sm:text-base">Retirada de campanha</h1>
-            <p className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Controle de produção e rastreabilidade</p>
+            <p className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Registro de retirada da Produção</p>
           </div>
         </header>
 
@@ -230,38 +221,25 @@ export function PickupSignaturePage() {
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <SignatureCard
-                  title="Produção (recebimento)"
-                  value={request.productionSignature}
-                  active={role === 'production'}
-                  onSelect={() => chooseRole('production')}
-                />
-                <SignatureCard
-                  title="Logística / separação"
-                  value={request.logisticsSignature}
-                  active={role === 'logistics'}
-                  onSelect={() => chooseRole('logistics')}
-                />
-              </div>
-
-              {signedBy && !editing ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
-                    <CheckCircle2 className="h-4 w-4" /> Assinatura desta área registrada
+              {request.productionSignature ? (
+                <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <h2 className="flex items-center gap-2 text-sm font-bold text-emerald-900">
+                    <CheckCircle2 className="h-4 w-4" /> Registro da Produção
+                  </h2>
+                  <p className="mt-2 text-xs text-emerald-900">
+                    Assinado por <span className="font-bold">{request.productionSignature.name}</span> em {formatDateTime(request.productionSignature.signedAt)}.
+                  </p>
+                  <div className="mt-3 rounded-lg border-b border-emerald-300 bg-white px-3">
+                    <img src={request.productionSignature.image} alt={`Assinatura de ${request.productionSignature.name}`} className="h-20 w-full object-contain object-left" />
                   </div>
-                  <button type="button" onClick={() => { setName(signedBy.name); setEditing(true); setSuccess(''); }}
-                    className="text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900">
-                    Substituir assinatura
-                  </button>
-                </div>
+                  <p className="mt-3 text-xs font-medium text-emerald-800">Comprovante em modo somente consulta. Não é possível assinar novamente.</p>
+                </section>
               ) : (
                 <section className="rounded-xl border border-slate-200 bg-white p-4">
                   <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900">
                     <PenLine className="h-4 w-4 text-emerald-700" />
-                    Assinar como {role === 'production' ? 'Produção (recebimento)' : 'Logística / separação'}
+                    Assinatura da Produção
                   </h2>
-                  {signedBy && <p className="mt-2 text-xs text-amber-800">Esta assinatura substituirá o registro anterior desta área.</p>}
                   <label className="mt-3 block space-y-1.5 text-xs font-medium text-slate-700">
                     Nome completo
                     <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name"
@@ -286,19 +264,23 @@ export function PickupSignaturePage() {
             </div>
           )}
         </section>
-        <footer className="flex flex-wrap items-center justify-between gap-4 bg-emerald-800 px-5 py-3 text-white sm:px-8">
-          <div className="flex items-center gap-3">
-            <PackageCheck className="h-8 w-8" />
-            <div className="text-xs font-extrabold tracking-wide">
-              CAMPANHA RETIRADA
-              <span className="mt-0.5 block text-[9px] font-medium tracking-[0.2em] text-emerald-100">MATERIAL CONFERIDO E RECEBIDO</span>
+        {request && (
+          <footer className="flex flex-wrap items-center justify-between gap-4 bg-emerald-800 px-5 py-3 text-white sm:px-8">
+            <div className="flex items-center gap-3">
+              <PackageCheck className="h-8 w-8" />
+              <div className="text-xs font-extrabold tracking-wide">
+                CAMPANHA RETIRADA
+                <span className="mt-0.5 block text-[9px] font-medium tracking-[0.2em] text-emerald-100">
+                  {request.productionSignature ? 'MATERIAL CONFERIDO E RECEBIDO' : 'AGUARDANDO ASSINATURA DA PRODUÇÃO'}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="min-w-[180px] rounded bg-white px-3 py-2 text-center text-slate-900">
-            <span className="block text-[9px] font-bold uppercase tracking-wide text-slate-500">Código da campanha</span>
-            <span className="mt-0.5 block break-all font-mono text-xs font-bold">{request?.campaignCode}</span>
-          </div>
-        </footer>
+            <div className="min-w-[180px] rounded bg-white px-3 py-2 text-center text-slate-900">
+              <span className="block text-[9px] font-bold uppercase tracking-wide text-slate-500">Código da campanha</span>
+              <span className="mt-0.5 block break-all font-mono text-xs font-bold">{request.campaignCode}</span>
+            </div>
+          </footer>
+        )}
       </div>
     </main>
   );
@@ -310,41 +292,5 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p>
     </div>
-  );
-}
-
-function SignatureCard({
-  title,
-  value,
-  active,
-  onSelect,
-}: {
-  title: string;
-  value?: CapturedSignature;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button type="button" onClick={onSelect}
-      className={`rounded-xl border p-3 text-left transition ${active ? 'border-emerald-400 bg-emerald-50/50 ring-2 ring-emerald-100' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
-      <span className="flex items-center justify-between gap-2 text-xs font-bold text-slate-800">
-        {title}
-        {value ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : <PenLine className="h-4 w-4 shrink-0 text-slate-400" />}
-      </span>
-      <span className="mt-2 block border-t border-slate-200 pt-2 text-[10px] text-slate-600">
-        Nome: <span className="font-semibold text-slate-900">{value?.name || '____________________________'}</span>
-      </span>
-      <span className="mt-1 block text-[10px] text-slate-600">Assinatura:</span>
-      {value ? (
-        <span className="block border-b border-slate-300">
-          <img src={value.image} alt={`Assinatura de ${value.name}`} className="h-12 w-full object-contain object-left" />
-        </span>
-      ) : (
-        <span aria-hidden="true" className="mt-8 block border-b border-slate-300" />
-      )}
-      <span className="mt-1 block text-[10px] text-slate-600">
-        Data: {value ? new Date(value.signedAt).toLocaleString('pt-BR') : '____/____/________'}
-      </span>
-    </button>
   );
 }

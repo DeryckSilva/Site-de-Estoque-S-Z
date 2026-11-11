@@ -18,5 +18,4 @@ export interface PickupSignatureRequest {
   observations: string;
   createdAt: string;
   productionSignature?: CapturedSignature;
-  logisticsSignature?: CapturedSignature;
 }

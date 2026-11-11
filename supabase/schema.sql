@@ -44,7 +44,9 @@ declare
 begin
   if p_request_id is null
     or jsonb_typeof(p_request_data) is distinct from 'object'
-    or p_request_data ->> 'id' is distinct from p_request_id::text then
+    or p_request_data ->> 'id' is distinct from p_request_id::text
+    or p_request_data ? 'productionSignature'
+    or p_request_data ? 'logisticsSignature' then
     raise exception 'Invalid pickup signature request';
   end if;
 
@@ -76,8 +78,7 @@ declare
 begin
   if p_request_id is null
     or p_expected_revision is null
-    or p_role is null
-    or p_role not in ('production', 'logistics')
+    or p_role is distinct from 'production'
     or jsonb_typeof(p_signature) is distinct from 'object'
     or nullif(btrim(p_signature ->> 'name'), '') is null
     or coalesce(p_signature ->> 'image' like 'data:image/png;base64,%', false) = false
@@ -86,11 +87,12 @@ begin
   end if;
 
   update public.pickup_signature_requests
-  set data = jsonb_set(data, array[p_role || 'Signature'], p_signature, true),
+  set data = jsonb_set(data, '{productionSignature}', p_signature, true),
       revision = revision + 1,
       updated_at = now()
   where id = p_request_id
     and revision = p_expected_revision
+    and coalesce(data -> 'productionSignature', 'null'::jsonb) = 'null'::jsonb
   returning revision into next_revision;
 
   return next_revision;

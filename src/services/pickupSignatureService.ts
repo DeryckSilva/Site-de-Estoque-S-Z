@@ -1,10 +1,9 @@
-import { sharedWmsClient } from './sharedWmsStore';
+import { sharedPickupClient } from './pickupSignatureStore';
 import type { CapturedSignature, PickupSignatureRequest } from '../types/pickupSignature';
 
 const LOCAL_STORAGE_KEY = 'kiraso_pickup_signatures_v1';
 const SHARED_REQUEST_IDS_KEY = 'kiraso_pickup_signature_ids_v1';
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export type SignatureRole = 'production' | 'logistics';
 
 interface SharedRequestRecord {
   request: PickupSignatureRequest;
@@ -40,8 +39,7 @@ function isPickupSignatureRequest(value: unknown): value is PickupSignatureReque
     (request.campaignCode === undefined || typeof request.campaignCode === 'string') &&
     (request.separationDate === undefined || typeof request.separationDate === 'string') &&
     (request.observations === undefined || typeof request.observations === 'string') &&
-    (request.productionSignature === undefined || isCapturedSignature(request.productionSignature)) &&
-    (request.logisticsSignature === undefined || isCapturedSignature(request.logisticsSignature));
+    (request.productionSignature === undefined || isCapturedSignature(request.productionSignature));
 }
 
 function normalizeRequest(value: unknown): PickupSignatureRequest | null {
@@ -57,16 +55,14 @@ function normalizeRequest(value: unknown): PickupSignatureRequest | null {
 function mergeRequest(
   previous: PickupSignatureRequest | undefined,
   request: PickupSignatureRequest,
-  signatureUpdate?: { role: SignatureRole; value: CapturedSignature },
+  signatureUpdate?: CapturedSignature,
 ): PickupSignatureRequest {
   const merged: PickupSignatureRequest = {
     ...previous,
     ...request,
     productionSignature: previous?.productionSignature ?? request.productionSignature,
-    logisticsSignature: previous?.logisticsSignature ?? request.logisticsSignature,
   };
-  if (signatureUpdate?.role === 'production') merged.productionSignature = signatureUpdate.value;
-  if (signatureUpdate?.role === 'logistics') merged.logisticsSignature = signatureUpdate.value;
+  if (signatureUpdate) merged.productionSignature = signatureUpdate;
   return merged;
 }
 
@@ -121,9 +117,9 @@ function decodeSharedRequestRecords(value: unknown): SharedRequestRecord[] {
 }
 
 async function loadSharedRequestRecords(ids: string[]): Promise<SharedRequestRecord[]> {
-  if (!sharedWmsClient || ids.length === 0) return [];
+  if (!sharedPickupClient || ids.length === 0) return [];
 
-  const { data, error } = await sharedWmsClient.rpc('get_pickup_signature_requests', {
+  const { data, error } = await sharedPickupClient.rpc('get_pickup_signature_requests', {
     p_request_ids: ids,
   });
   if (error) throw error;
@@ -131,7 +127,7 @@ async function loadSharedRequestRecords(ids: string[]): Promise<SharedRequestRec
 }
 
 export async function loadPickupSignatures(requestId?: string): Promise<PickupSignatureRequest[]> {
-  if (!sharedWmsClient) {
+  if (!sharedPickupClient) {
     const localRequests = readLocalRequests();
     return requestId ? localRequests.filter((request) => request.id === requestId) : localRequests;
   }
@@ -148,15 +144,18 @@ export async function loadPickupSignatures(requestId?: string): Promise<PickupSi
 
 export async function savePickupSignature(
   request: PickupSignatureRequest,
-  signatureUpdate?: { role: SignatureRole; value: CapturedSignature },
+  signatureUpdate?: CapturedSignature,
 ): Promise<void> {
   if (!isPickupSignatureRequest(request)) {
     throw new Error('Os dados da retirada estão incompletos ou inválidos.');
   }
 
-  if (!sharedWmsClient) {
+  if (!sharedPickupClient) {
     const requests = readLocalRequests();
     const previous = requests.find((item) => item.id === request.id);
+    if (signatureUpdate && (previous?.productionSignature || request.productionSignature)) {
+      throw new Error('Esta retirada já foi assinada pela Produção e está disponível somente para consulta.');
+    }
     const nextRequest = mergeRequest(previous, request, signatureUpdate);
     const next = [nextRequest, ...requests.filter((item) => item.id !== request.id)];
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
@@ -166,7 +165,7 @@ export async function savePickupSignature(
 
   if (!signatureUpdate) {
     rememberSharedRequestId(request.id);
-    const { data, error } = await sharedWmsClient.rpc('create_pickup_signature_request', {
+    const { data, error } = await sharedPickupClient.rpc('create_pickup_signature_request', {
       p_request_id: request.id,
       p_request_data: request,
     });
@@ -178,7 +177,7 @@ export async function savePickupSignature(
     return;
   }
 
-  if (!isCapturedSignature(signatureUpdate.value)) {
+  if (!isCapturedSignature(signatureUpdate)) {
     throw new Error('Os dados da assinatura estão incompletos ou inválidos.');
   }
 
@@ -187,12 +186,15 @@ export async function savePickupSignature(
     if (!current) {
       throw new Error('Retirada não encontrada no compartilhamento. Peça à Produção para gerar um novo QR Code.');
     }
+    if (current.request.productionSignature) {
+      throw new Error('Esta retirada já foi assinada pela Produção e está disponível somente para consulta.');
+    }
 
-    const { data: saved, error: saveError } = await sharedWmsClient.rpc('save_pickup_signature_request', {
+    const { data: saved, error: saveError } = await sharedPickupClient.rpc('save_pickup_signature_request', {
       p_request_id: request.id,
       p_expected_revision: current.revision,
-      p_role: signatureUpdate.role,
-      p_signature: signatureUpdate.value,
+      p_role: 'production',
+      p_signature: signatureUpdate,
     });
     if (saveError) throw saveError;
     if (typeof saved === 'number' && Number.isSafeInteger(saved)) {
@@ -212,7 +214,7 @@ export function watchPickupSignatures(onChange: () => void): () => void {
   window.addEventListener('storage', refresh);
   window.addEventListener('kiraso_pickup_signatures_sync', refresh);
   window.addEventListener('focus', refresh);
-  const interval = sharedWmsClient
+  const interval = sharedPickupClient
     ? window.setInterval(() => {
       if (document.visibilityState === 'visible') refresh();
     }, 15_000)
