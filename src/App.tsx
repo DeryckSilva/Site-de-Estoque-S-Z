@@ -28,6 +28,7 @@ import {
   Plus,
   Trash2,
   MapPinned,
+  PenLine,
   QrCode,
 } from 'lucide-react';
 import { ProductionMappingTab } from './components/mapping/ProductionMappingTab';
@@ -36,6 +37,7 @@ import { WarehouseWmsTab } from './components/inventory/WarehouseWmsTab';
 import { PreExitTab } from './components/production/PreExitTab';
 import { PickupSignatureTab } from './components/production/PickupSignatureTab';
 import { PickupSignaturePage } from './components/production/PickupSignaturePage';
+import { PickupKioskTab } from './components/production/PickupKioskTab';
 import { EQUIPMENT_ITEMS } from './data/initialData';
 
 // ---------- Mock data (Base do Site) ----------
@@ -262,6 +264,7 @@ const NAV_GROUPS = [
       { id: 'ordens_producao', label: 'Painel de Pedidos', icon: ClipboardList },
       { id: 'pre_saida', label: 'Pré-saída', icon: ClipboardMinus },
       { id: 'assinaturas', label: 'Assinatura da retirada', icon: QrCode },
+      { id: 'retirada_interativa', label: 'Retirada pelo tablet', icon: PenLine },
     ],
   },
   {
@@ -1118,6 +1121,7 @@ function Sidebar({
 function getInitialView(): string {
   const view = new URLSearchParams(window.location.search).get('view');
   if (view === 'assinaturas') return 'assinaturas';
+  if (view === 'retirada-interativa') return 'retirada_interativa';
   if (view === 'mapa-ao-vivo') return 'mapeamento_ao_vivo';
   if (view === 'planta-3d') return 'planta_3d';
   return 'ordens_producao';
@@ -1135,6 +1139,7 @@ export default function App() {
     if (viewId === 'mapeamento_ao_vivo') url.searchParams.set('view', 'mapa-ao-vivo');
     else if (viewId === 'planta_3d') url.searchParams.set('view', 'planta-3d');
     else if (viewId === 'assinaturas') url.searchParams.set('view', 'assinaturas');
+    else if (viewId === 'retirada_interativa') url.searchParams.set('view', 'retirada-interativa');
     else url.searchParams.delete('view');
     window.history.pushState({}, '', url);
   };
@@ -1156,6 +1161,8 @@ export default function App() {
         return 'Pré-saída';
       case 'assinaturas':
         return 'Assinatura da retirada';
+      case 'retirada_interativa':
+        return 'Retirada pelo tablet';
       case 'mapeamento_producao':
         return 'Mapeamento de Produção';
       case 'posicao_estoque':
@@ -1232,6 +1239,7 @@ export default function App() {
 
             {currentView === 'pre_saida' && <PreExitTab />}
             {currentView === 'assinaturas' && <PickupSignatureTab />}
+            {currentView === 'retirada_interativa' && <PickupKioskTab />}
 
             {/* View 2: Mapeamento de Produção (Online spreadsheet) */}
             {currentView === 'mapeamento_producao' && (

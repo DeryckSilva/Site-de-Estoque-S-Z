@@ -32,4 +32,6 @@ O acesso ao QR é público por UUID: qualquer pessoa com o link pode consultar a
 
 O script `pickup-signatures.sql` também habilita a lista compartilhada de retiradas e a exclusão permanente de qualquer registro por qualquer visitante, sem login. A exclusão invalida o QR.
 
+Na aba **Retirada pelo tablet**, a Produção pode localizar uma retirada pendente pelo pedido ou cliente e abrir diretamente a página de conferência e assinatura, sem escanear o QR. Os registros precisam ter sido criados previamente na aba **Assinatura da retirada**; após assinados, deixam de aparecer como pendentes no painel do tablet.
+
 **Atenção:** `supabase/schema.sql` configura `warehouse_state` e a lista de retiradas para leitura e alteração públicas, sem login. Qualquer pessoa com acesso ao site pode consultar e modificar o estoque, as movimentações e os registros de retirada. Execute o schema completo somente se esse nível de acesso for aceitável para a empresa.

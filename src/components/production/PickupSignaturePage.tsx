@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { CheckCircle2, Eraser, Handshake, PackageCheck, PenLine } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eraser, Handshake, PackageCheck, PenLine } from 'lucide-react';
 import type { CapturedSignature, PickupSignatureRequest } from '../../types/pickupSignature';
 import { loadPickupSignatures, savePickupSignature, watchPickupSignatures } from '../../services/pickupSignatureService';
 import { sharedPickupClient } from '../../services/pickupSignatureStore';
@@ -98,6 +98,13 @@ function formatDateTime(date: string): string {
 
 export function PickupSignaturePage() {
   const requestId = useMemo(() => new URLSearchParams(window.location.search).get('id') ?? '', []);
+  const isTabletFlow = useMemo(() => new URLSearchParams(window.location.search).get('source') === 'tablet', []);
+  const tabletKioskUrl = useMemo(() => {
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('view', 'retirada-interativa');
+    return url.toString();
+  }, []);
   const [request, setRequest] = useState<PickupSignatureRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
@@ -179,6 +186,15 @@ export function PickupSignaturePage() {
             <p className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Registro de retirada da Produção</p>
           </div>
         </header>
+
+        {isTabletFlow && (
+          <div className="px-5 pt-4 sm:px-8">
+            <a href={tabletKioskUrl}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-200">
+              <ArrowLeft className="h-4 w-4" /> Voltar à seleção de pedidos
+            </a>
+          </div>
+        )}
 
         <section className="px-5 py-5 sm:px-8">
           {loading ? (
