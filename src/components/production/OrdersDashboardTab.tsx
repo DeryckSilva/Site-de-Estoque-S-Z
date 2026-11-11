@@ -14,7 +14,6 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { INITIAL_PRODUCTION_ORDERS } from '../../data/productionOrdersData';
 import { ORDERS_DATABASE } from '../../data/ordersDatabase';
 import { EQUIPMENT_ITEMS } from '../../data/initialData';
 import { loadAttendedOrderNumbers, loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
@@ -22,6 +21,7 @@ import { OrderItem } from '../../types/mapping';
 import { BaseOrder } from '../../types/orders';
 import { ProductionOrder } from '../../types/production';
 import { STORAGE_KEYS } from '../../services/productionSyncService';
+import { readPanelProductionOrders } from '../../services/productionOrdersService';
 
 const PENDING_ORDERS_KEY = 'kiraso_pending_ops';
 const REFRESH_INTERVAL_KEY = 'kiraso_orders_dashboard_refresh_interval';
@@ -94,19 +94,6 @@ function toMappingOrder(source: BaseOrder, existing?: OrderItem): OrderItem {
   };
 }
 
-function readOrders(): ProductionOrder[] {
-  const saved = localStorage.getItem(PENDING_ORDERS_KEY);
-  if (!saved) return INITIAL_PRODUCTION_ORDERS;
-
-  try {
-    const parsed: unknown = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed as ProductionOrder[] : INITIAL_PRODUCTION_ORDERS;
-  } catch (error) {
-    console.error('Falha ao carregar pedidos do painel:', error);
-    return INITIAL_PRODUCTION_ORDERS;
-  }
-}
-
 function readMappingOrders(): OrderItem[] {
   const saved = localStorage.getItem(STORAGE_KEYS.MAPPING_ORDERS);
   if (!saved) return [];
@@ -121,7 +108,7 @@ function readMappingOrders(): OrderItem[] {
 }
 
 export function OrdersDashboardTab() {
-  const [orders, setOrders] = useState<ProductionOrder[]>(readOrders);
+  const [orders, setOrders] = useState<ProductionOrder[]>(readPanelProductionOrders);
   const [mappingOrders, setMappingOrders] = useState<OrderItem[]>(readMappingOrders);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
@@ -189,7 +176,7 @@ export function OrdersDashboardTab() {
       localStorage.setItem(LAST_SYNC_KEY, timestamp);
       localStorage.setItem(SYNC_HISTORY_KEY, JSON.stringify(nextHistory));
       setMappingOrders(nextMappingOrders);
-      setOrders(readOrders());
+      setOrders(readPanelProductionOrders());
       setLastSyncAt(timestamp);
       setSyncHistory(nextHistory);
       window.dispatchEvent(new CustomEvent('kiraso_mapping_sync'));
@@ -228,7 +215,7 @@ export function OrdersDashboardTab() {
         const mappedOrders = readMappingOrders();
         if (localStorage.getItem(STORAGE_KEYS.MAPPING_ORDERS) === null) return;
 
-        const previousOrders = readOrders();
+        const previousOrders = readPanelProductionOrders();
         const previousByNumber = new Map(previousOrders.map((order) => [order.pedido.toLowerCase(), order]));
         const rawDeliveries = localStorage.getItem(STORAGE_KEYS.MAPPING_DELIVERIES);
         const deliveries = rawDeliveries
@@ -283,7 +270,7 @@ export function OrdersDashboardTab() {
     };
 
     const refreshOrders = () => {
-      setOrders(readOrders());
+      setOrders(readPanelProductionOrders());
       setMappingOrders(readMappingOrders());
     };
 

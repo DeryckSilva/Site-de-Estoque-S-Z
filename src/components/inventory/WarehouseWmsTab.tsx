@@ -66,6 +66,7 @@ function normalizeData(value: Partial<WmsData>): WmsData {
       productionOrderCode: movement.productionOrderCode ?? '',
     })),
     layout: value.layout ?? DEFAULT_WAREHOUSE_LAYOUT,
+    pickupSignatures: value.pickupSignatures ?? [],
   };
 }
 

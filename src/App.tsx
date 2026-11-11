@@ -6,6 +6,7 @@ import {
   Factory,
   FileText,
   ClipboardList,
+  ClipboardMinus,
   BarChart3,
   Warehouse,
   Tag,
@@ -27,10 +28,14 @@ import {
   Plus,
   Trash2,
   MapPinned,
+  QrCode,
 } from 'lucide-react';
 import { ProductionMappingTab } from './components/mapping/ProductionMappingTab';
 import { OrdersDashboardTab } from './components/production/OrdersDashboardTab';
 import { WarehouseWmsTab } from './components/inventory/WarehouseWmsTab';
+import { PreExitTab } from './components/production/PreExitTab';
+import { PickupSignatureTab } from './components/production/PickupSignatureTab';
+import { PickupSignaturePage } from './components/production/PickupSignaturePage';
 import { EQUIPMENT_ITEMS } from './data/initialData';
 
 // ---------- Mock data (Base do Site) ----------
@@ -255,6 +260,8 @@ const NAV_GROUPS = [
     label: 'PRODUÇÃO',
     items: [
       { id: 'ordens_producao', label: 'Painel de Pedidos', icon: ClipboardList },
+      { id: 'pre_saida', label: 'Pré-saída', icon: ClipboardMinus },
+      { id: 'assinaturas', label: 'Assinatura da retirada', icon: QrCode },
     ],
   },
   {
@@ -1108,16 +1115,17 @@ function Sidebar({
 
 // ---------- App ----------
 
+function getInitialView(): string {
+  const view = new URLSearchParams(window.location.search).get('view');
+  if (view === 'assinaturas') return 'assinaturas';
+  if (view === 'mapa-ao-vivo') return 'mapeamento_ao_vivo';
+  if (view === 'planta-3d') return 'planta_3d';
+  return 'ordens_producao';
+}
+
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // Default to the requested view from user screenshot: 'ordens_producao'
-  const [currentView, setCurrentView] = useState<string>(() =>
-    new URLSearchParams(window.location.search).get('view') === 'mapa-ao-vivo'
-      ? 'mapeamento_ao_vivo'
-      : new URLSearchParams(window.location.search).get('view') === 'planta-3d'
-        ? 'planta_3d'
-      : 'ordens_producao'
-  );
+  const [currentView, setCurrentView] = useState<string>(getInitialView);
   // Secondary tab for Posicao de Estoque
   const [stockTab, setStockTab] = useState('manage');
 
@@ -1126,19 +1134,14 @@ export default function App() {
     const url = new URL(window.location.href);
     if (viewId === 'mapeamento_ao_vivo') url.searchParams.set('view', 'mapa-ao-vivo');
     else if (viewId === 'planta_3d') url.searchParams.set('view', 'planta-3d');
+    else if (viewId === 'assinaturas') url.searchParams.set('view', 'assinaturas');
     else url.searchParams.delete('view');
     window.history.pushState({}, '', url);
   };
 
   useEffect(() => {
     const restoreViewFromUrl = () => {
-      setCurrentView(
-        new URLSearchParams(window.location.search).get('view') === 'mapa-ao-vivo'
-          ? 'mapeamento_ao_vivo'
-          : new URLSearchParams(window.location.search).get('view') === 'planta-3d'
-            ? 'planta_3d'
-          : 'ordens_producao'
-      );
+      setCurrentView(getInitialView());
     };
     window.addEventListener('popstate', restoreViewFromUrl);
     return () => window.removeEventListener('popstate', restoreViewFromUrl);
@@ -1149,6 +1152,10 @@ export default function App() {
     switch (currentView) {
       case 'ordens_producao':
         return 'Painel de Pedidos';
+      case 'pre_saida':
+        return 'Pré-saída';
+      case 'assinaturas':
+        return 'Assinatura da retirada';
       case 'mapeamento_producao':
         return 'Mapeamento de Produção';
       case 'posicao_estoque':
@@ -1171,6 +1178,10 @@ export default function App() {
         return 'Ordens de Produção';
     }
   };
+
+  if (new URLSearchParams(window.location.search).get('view') === 'assinatura') {
+    return <PickupSignaturePage />;
+  }
 
   if (currentView === 'mapeamento_ao_vivo') {
     return <WarehouseWmsTab initialView="live-map" onExitLiveMap={() => navigateToView('wms')} />;
@@ -1218,6 +1229,9 @@ export default function App() {
             {currentView === 'ordens_producao' && (
               <OrdersDashboardTab />
             )}
+
+            {currentView === 'pre_saida' && <PreExitTab />}
+            {currentView === 'assinaturas' && <PickupSignatureTab />}
 
             {/* View 2: Mapeamento de Produção (Online spreadsheet) */}
             {currentView === 'mapeamento_producao' && (

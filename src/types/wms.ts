@@ -1,3 +1,5 @@
+import type { PickupSignatureRequest } from './pickupSignature';
+
 export type Unit = 'UN' | 'MT';
 export type MovementKind = 'baixa' | 'transferencia' | 'saida_producao';
 
@@ -60,6 +62,7 @@ export type WmsData = {
   movements: StockMovement[];
   layout?: WarehouseSceneObject[];
   room?: { width: number; length: number };
+  pickupSignatures?: PickupSignatureRequest[];
 };
 
 export const DEFAULT_WAREHOUSE_LAYOUT: WarehouseSceneObject[] = [
