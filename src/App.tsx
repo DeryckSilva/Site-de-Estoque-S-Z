@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   LayoutGrid,
   Package,
@@ -1130,8 +1130,11 @@ function getInitialView(): string {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentView, setCurrentView] = useState<string>(getInitialView);
+  const kioskUnlockClicks = useRef(0);
+  const kioskUnlockTimeout = useRef<number | null>(null);
   // Secondary tab for Posicao de Estoque
   const [stockTab, setStockTab] = useState('manage');
+  const isPickupKiosk = currentView === 'retirada_interativa';
 
   const navigateToView = (viewId: string) => {
     setCurrentView(viewId);
@@ -1142,6 +1145,24 @@ export default function App() {
     else if (viewId === 'retirada_interativa') url.searchParams.set('view', 'retirada-interativa');
     else url.searchParams.delete('view');
     window.history.pushState({}, '', url);
+  };
+
+  const handleBrandClick = () => {
+    if (!isPickupKiosk) return;
+
+    window.clearTimeout(kioskUnlockTimeout.current ?? undefined);
+    kioskUnlockClicks.current += 1;
+    if (kioskUnlockClicks.current >= 5) {
+      kioskUnlockClicks.current = 0;
+      if (window.confirm('Voltar à tela padrão?')) {
+        navigateToView('ordens_producao');
+      }
+      return;
+    }
+
+    kioskUnlockTimeout.current = window.setTimeout(() => {
+      kioskUnlockClicks.current = 0;
+    }, 2000);
   };
 
   useEffect(() => {
@@ -1199,30 +1220,42 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-[#f8fafc] text-slate-900 overflow-hidden font-sans">
-      <Sidebar
-        open={sidebarOpen}
-        setOpen={setSidebarOpen}
-        currentView={currentView}
-        onSelectView={navigateToView}
-      />
+      {!isPickupKiosk && (
+        <Sidebar
+          open={sidebarOpen}
+          setOpen={setSidebarOpen}
+          currentView={currentView}
+          onSelectView={navigateToView}
+        />
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden">
         {/* Top App Header with exact breadcrumb as in image */}
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200/80 bg-white px-4">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm">
-              <Boxes className="h-3.5 w-3.5" />
-            </span>
-            <span className="hidden text-xs font-bold text-slate-800 sm:inline">Produção &amp; Logística S&amp;Z</span>
+            <button
+              type="button"
+              onClick={handleBrandClick}
+              disabled={!isPickupKiosk}
+              aria-label="Produção & Logística S&Z"
+              className="flex items-center gap-2.5 bg-transparent text-left disabled:cursor-default"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm">
+                <Boxes className="h-3.5 w-3.5" />
+              </span>
+              <span className="hidden text-xs font-bold text-slate-800 sm:inline">Produção &amp; Logística S&amp;Z</span>
+            </button>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">
-            <button
-              onClick={() => setSidebarOpen((v) => !v)}
-              className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-slate-700 mr-1"
-              title="Recolher / Expandir Menu"
-            >
-              <Menu className="h-4 w-4" />
-            </button>
+            {!isPickupKiosk && (
+              <button
+                onClick={() => setSidebarOpen((v) => !v)}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-slate-700 mr-1"
+                title="Recolher / Expandir Menu"
+              >
+                <Menu className="h-4 w-4" />
+              </button>
+            )}
             <span>Produção e Logística</span>
             <ChevronRight className="h-3 w-3 text-gray-300" />
             <span className="font-semibold text-slate-800">{getBreadcrumb()}</span>
