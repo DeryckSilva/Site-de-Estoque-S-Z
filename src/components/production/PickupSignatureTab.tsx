@@ -459,6 +459,7 @@ export function PickupSignatureTab() {
                     title={`Consulta da retirada ${getRecordTypeLabel(selectedRequest.recordType)} ${selectedRequest.salesOrder}`}
                   />
                   <div className="pickup-label-order">
+                    <span className="pickup-label-kicker">Retirada · Produção</span>
                     <span className="pickup-label-caption">Nº do pedido</span>
                     <strong className="pickup-label-order-number">{selectedRequest.salesOrder}</strong>
                     <div className="pickup-label-date">
@@ -470,8 +471,14 @@ export function PickupSignatureTab() {
                 <div className="pickup-label-details">
                   <strong className="pickup-label-customer">{selectedRequest.customer}</strong>
                   <div className="pickup-label-quantities">
-                    <span>Equipamentos: <strong>{selectedRequest.equipmentQuantity}</strong></span>
-                    <span>Chips: <strong>{selectedRequest.chipQuantity}</strong></span>
+                    <div className="pickup-label-quantity">
+                      <span>Equipamentos</span>
+                      <strong>{selectedRequest.equipmentQuantity}</strong>
+                    </div>
+                    <div className="pickup-label-quantity">
+                      <span>Chips</span>
+                      <strong>{selectedRequest.chipQuantity}</strong>
+                    </div>
                   </div>
                 </div>
               </div>

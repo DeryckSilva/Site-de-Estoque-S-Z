@@ -8,10 +8,10 @@
   flex-direction: column;
   overflow: hidden;
   gap: 1.5mm;
-  border: 0.3mm solid #d1d5db;
-  border-radius: 3mm;
+  border: 0.35mm solid #111;
+  border-radius: 2.5mm;
   background: #fff;
-  padding: 2mm;
+  padding: 2mm 2.5mm;
   color: #111;
   text-align: left;
 }
@@ -22,8 +22,8 @@
   flex: 0 0 39mm;
   grid-template-columns: 37mm minmax(0, 1fr);
   gap: 2mm;
-  border-bottom: 0.7mm solid #111;
-  padding-bottom: 1mm;
+  border-bottom: 0.5mm solid #111;
+  padding-bottom: 1.5mm;
 }
 
 .pickup-label-qr {
@@ -37,11 +37,21 @@
   min-width: 0;
   flex-direction: column;
   align-items: flex-start;
-  padding-top: 1mm;
+  padding-top: 0.5mm;
+}
+
+.pickup-label-kicker {
+  margin-bottom: 1mm;
+  font-size: 2.7mm;
+  font-weight: 800;
+  letter-spacing: 0.25mm;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .pickup-label-caption {
-  font-size: 3.3mm;
+  color: #555;
+  font-size: 2.9mm;
   font-weight: 700;
   line-height: 1.1;
   text-transform: uppercase;
@@ -49,20 +59,22 @@
 
 .pickup-label-order-number {
   overflow-wrap: anywhere;
-  font-size: 7mm;
+  font-size: 5.4mm;
   font-weight: 800;
-  line-height: 1.05;
+  line-height: 1.1;
 }
 
 .pickup-label-date {
   display: flex;
   flex-direction: column;
   gap: 0.5mm;
-  margin-top: 1mm;
+  margin-top: 1.5mm;
+  border-top: 0.25mm solid #aaa;
+  padding-top: 1mm;
 }
 
 .pickup-label-date strong {
-  font-size: 4mm;
+  font-size: 3.7mm;
   line-height: 1.1;
 }
 
@@ -71,28 +83,43 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 1mm;
-  padding-top: 0.5mm;
+  gap: 1.5mm;
+  padding-top: 1mm;
 }
 
 .pickup-label-customer {
+  display: -webkit-box;
   overflow: hidden;
-  font-size: 6mm;
+  font-size: 5mm;
   font-weight: 800;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.05;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .pickup-label-quantities {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2mm;
+}
+
+.pickup-label-quantity {
   display: flex;
   flex-direction: column;
   gap: 0.5mm;
-  font-size: 4mm;
-  line-height: 1.05;
+  font-size: 2.8mm;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.pickup-label-quantities strong {
+.pickup-label-quantity + .pickup-label-quantity {
+  border-left: 0.25mm solid #aaa;
+  padding-left: 2mm;
+}
+
+.pickup-label-quantity strong {
+  font-size: 4.5mm;
   font-weight: 800;
 }
 
@@ -118,6 +145,19 @@
     margin: 0 !important;
     padding: 0 !important;
     overflow: hidden !important;
+  }
+
+  #root {
+    position: relative !important;
+    width: 95mm !important;
+    height: 65mm !important;
+    min-height: 0 !important;
+    max-height: 65mm !important;
+    overflow: hidden !important;
+  }
+
+  body *:not(#pickup-signature-qr-print):not(#pickup-signature-qr-print *):not(:has(#pickup-signature-qr-print)) {
+    display: none !important;
   }
 
   body * {
