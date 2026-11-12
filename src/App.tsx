@@ -255,7 +255,6 @@ const NAV_GROUPS = [
       { id: 'mapeamento_producao', label: 'Mapeamento de Produção', icon: LayoutGrid },
       { id: 'wms', label: 'WMS · PLP e serializados', icon: Barcode },
       { id: 'mapeamento_ao_vivo', label: 'Mapa ao vivo do estoque', icon: MapPinned },
-      { id: 'planta_3d', label: 'Planta 3D do Estoque', icon: Boxes },
     ],
   },
   {
@@ -1123,7 +1122,6 @@ function getInitialView(): string {
   if (view === 'assinaturas') return 'assinaturas';
   if (view === 'retirada-interativa') return 'retirada_interativa';
   if (view === 'mapa-ao-vivo') return 'mapeamento_ao_vivo';
-  if (view === 'planta-3d') return 'planta_3d';
   return 'ordens_producao';
 }
 
@@ -1140,7 +1138,6 @@ export default function App() {
     setCurrentView(viewId);
     const url = new URL(window.location.href);
     if (viewId === 'mapeamento_ao_vivo') url.searchParams.set('view', 'mapa-ao-vivo');
-    else if (viewId === 'planta_3d') url.searchParams.set('view', 'planta-3d');
     else if (viewId === 'assinaturas') url.searchParams.set('view', 'assinaturas');
     else if (viewId === 'retirada_interativa') url.searchParams.set('view', 'retirada-interativa');
     else url.searchParams.delete('view');
@@ -1192,8 +1189,6 @@ export default function App() {
         return 'WMS · PLP e serializados';
       case 'mapeamento_ao_vivo':
         return 'Mapa ao vivo do estoque';
-      case 'planta_3d':
-        return 'Planta 3D do Estoque';
       case 'painel':
         return 'Painel';
       case 'suprimentos':
@@ -1213,9 +1208,6 @@ export default function App() {
 
   if (currentView === 'mapeamento_ao_vivo') {
     return <WarehouseWmsTab initialView="live-map" onExitLiveMap={() => navigateToView('wms')} />;
-  }
-  if (currentView === 'planta_3d') {
-    return <WarehouseWmsTab initialView="planta3d" onExitLiveMap={() => navigateToView('wms')} />;
   }
 
   return (

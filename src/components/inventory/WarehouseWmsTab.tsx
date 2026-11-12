@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Activity, ArrowDownToLine, ArrowLeft, ArrowLeftRight, Barcode, Boxes, ClipboardMinus, Factory, Maximize2, MapPin, MapPinned, Minimize2, PackagePlus, Search } from 'lucide-react';
 import { WMS_INITIAL_STOCK } from '../../data/wmsSeed';
 import { INITIAL_IN_PROGRESS_ORDERS, INITIAL_PRODUCTION_ORDERS } from '../../data/productionOrdersData';
@@ -6,10 +6,6 @@ import type { ProductionOrder } from '../../types/production';
 import type { InventoryEntry, MovementKind, StockMovement, Unit, WmsData } from '../../types/wms';
 import { DEFAULT_WAREHOUSE_LAYOUT } from '../../types/wms';
 import { sharedWmsClient } from '../../services/sharedWmsStore';
-
-const WarehouseThreeMap = lazy(() => import('./WarehouseThreeMap').then((module) => ({
-  default: module.WarehouseThreeMap,
-})));
 
 const STORAGE_KEY = 'kiraso_wms_inventory_v2';
 const SEED_VERSION_KEY = 'kiraso_wms_inventory_seed_version';
@@ -1103,22 +1099,8 @@ function LegacyLiveStockMap({ data, onBack }: { data: WmsData; onBack?: () => vo
   );
 }
 
-function Planta3DMap({ data, onBack, onSave, syncStatus, notice }: {
-  data: WmsData;
-  onBack?: () => void;
-  onSave: (next: WmsData, message?: string) => void;
-  syncStatus: string;
-  notice: string;
-}) {
-  return (
-    <Suspense fallback={<div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-500">Carregando a planta 3D…</div>}>
-      <WarehouseThreeMap data={data} onSave={onSave} onBack={onBack} syncStatus={syncStatus} notice={notice} />
-    </Suspense>
-  );
-}
-
 export function WarehouseWmsTab({ initialView = 'stock', onExitLiveMap }: {
-  initialView?: 'stock' | 'production' | 'live-map' | 'planta3d';
+  initialView?: 'stock' | 'production' | 'live-map';
   onExitLiveMap?: () => void;
 }) {
   const [data, setData] = useState<WmsData>(readData);
@@ -1127,7 +1109,7 @@ export function WarehouseWmsTab({ initialView = 'stock', onExitLiveMap }: {
   const cloudReadyRef = useRef(!sharedWmsClient);
   const [notice, setNotice] = useState('');
   const [syncStatus, setSyncStatus] = useState(sharedWmsClient ? 'Conectando ao estoque compartilhado…' : 'Modo local · alterações só neste navegador');
-  const [activeView, setActiveView] = useState<'stock' | 'production' | 'charts' | 'live-map' | 'planta3d'>(initialView);
+  const [activeView, setActiveView] = useState<'stock' | 'production' | 'charts' | 'live-map'>(initialView);
   const [query, setQuery] = useState('');
   const [inbound, setInbound] = useState({
     location: '', itemCode: '', itemName: '', lot: '', boxCount: '1', quantity: '1', unit: 'UN' as Unit,
@@ -1469,19 +1451,16 @@ export function WarehouseWmsTab({ initialView = 'stock', onExitLiveMap }: {
 
   return (
     <div className="space-y-5">
-      {initialView !== 'production' && initialView !== 'live-map' && initialView !== 'planta3d' && <div className="flex gap-1 overflow-x-auto border-b border-gray-200" role="tablist" aria-label="WMS">
+      {initialView !== 'production' && initialView !== 'live-map' && <div className="flex gap-1 overflow-x-auto border-b border-gray-200" role="tablist" aria-label="WMS">
         <button type="button" role="tab" aria-selected={activeView === 'stock'} onClick={() => setActiveView('stock')} className={`inline-flex items-center gap-2 border-b-2 px-3.5 py-2 text-xs font-medium ${activeView === 'stock' ? 'border-blue-700 text-blue-700' : 'border-transparent text-gray-500 hover:text-slate-800'}`}><MapPin className="h-3.5 w-3.5" />Posições e estoque</button>
         <button type="button" role="tab" aria-selected={activeView === 'charts'} onClick={() => setActiveView('charts')} className={`inline-flex items-center gap-2 border-b-2 px-3.5 py-2 text-xs font-medium ${activeView === 'charts' ? 'border-blue-700 text-blue-700' : 'border-transparent text-gray-500 hover:text-slate-800'}`}><Boxes className="h-3.5 w-3.5" />Gráficos do estoque</button>
         <button type="button" role="tab" aria-selected={activeView === 'live-map'} onClick={() => setActiveView('live-map')} className={`inline-flex items-center gap-2 border-b-2 px-3.5 py-2 text-xs font-medium ${activeView === 'live-map' ? 'border-blue-700 text-blue-700' : 'border-transparent text-gray-500 hover:text-slate-800'}`}><MapPinned className="h-3.5 w-3.5" />Mapa ao vivo</button>
-        <button type="button" role="tab" aria-selected={activeView === 'planta3d'} onClick={() => setActiveView('planta3d')} className={`inline-flex items-center gap-2 border-b-2 px-3.5 py-2 text-xs font-medium ${activeView === 'planta3d' ? 'border-blue-700 text-blue-700' : 'border-transparent text-gray-500 hover:text-slate-800'}`}><Boxes className="h-3.5 w-3.5" />Planta 3D editável</button>
         <button type="button" role="tab" aria-selected={activeView === 'production'} onClick={() => setActiveView('production')} className={`inline-flex items-center gap-2 border-b-2 px-3.5 py-2 text-xs font-medium ${activeView === 'production' ? 'border-blue-700 text-blue-700' : 'border-transparent text-gray-500 hover:text-slate-800'}`}><Factory className="h-3.5 w-3.5" />Saída da produção</button>
       </div>}
       {initialView === 'production' || activeView === 'production'
         ? <ProductionIssuePanel data={data} onSave={persist} />
         : initialView === 'live-map' || activeView === 'live-map'
           ? <LegacyLiveStockMap data={data} onBack={onExitLiveMap} />
-        : initialView === 'planta3d' || activeView === 'planta3d'
-          ? <Planta3DMap data={data} onBack={onExitLiveMap} onSave={persist} syncStatus={syncStatus} notice={notice} />
         : activeView === 'charts' ? <InventoryCharts data={data} /> : <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-xs text-gray-500">Saldo conferido</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatQuantity(knownUnits, 'UN')}</div><div className="text-xs text-gray-400">Unidades</div></div>
