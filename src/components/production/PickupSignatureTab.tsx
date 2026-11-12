@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, QrCode, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, Plus, Printer, QrCode, RefreshCw, Search, Trash2 } from 'lucide-react';
 import type { ProductionOrder } from '../../types/production';
 import type { PickupRecordType, PickupSignatureRequest } from '../../types/pickupSignature';
 import type { BaseOrder } from '../../types/orders';
@@ -12,6 +12,7 @@ import { STORAGE_KEYS } from '../../services/productionSyncService';
 import { loadAttendedOrderNumbers, loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
 import { EQUIPMENT_ITEMS } from '../../data/initialData';
 import { sharedPickupClient } from '../../services/pickupSignatureStore';
+import { printPickupLabelWithZebra } from '../../services/zebraBrowserPrint';
 
 const TEST_RECORD_OPTION = '__pickup_test__';
 const AD_HOC_RECORD_OPTION = '__pickup_ad_hoc__';
@@ -106,6 +107,9 @@ export function PickupSignatureTab() {
   const [saving, setSaving] = useState(false);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
   const [deletingRequestId, setDeletingRequestId] = useState('');
+  const [isPrintingLabel, setIsPrintingLabel] = useState(false);
+  const [printError, setPrintError] = useState('');
+  const [printSuccess, setPrintSuccess] = useState('');
   const [error, setError] = useState('');
   const isTestRecord = selectedOrderId === TEST_RECORD_OPTION;
   const isAdHocRecord = selectedOrderId === AD_HOC_RECORD_OPTION;
@@ -232,6 +236,37 @@ export function PickupSignatureTab() {
 
   const selectedRequest = requests.find(({ request }) => request.id === selectedRequestId)?.request;
   const signaturePageUrl = selectedRequest && sharedPickupClient ? getSignatureUrl(selectedRequest.id) : '';
+
+  useEffect(() => {
+    setPrintError('');
+    setPrintSuccess('');
+  }, [selectedRequestId]);
+
+  const handlePrintLabel = async () => {
+    if (!selectedRequest || !signaturePageUrl) return;
+
+    setIsPrintingLabel(true);
+    setPrintError('');
+    setPrintSuccess('');
+    try {
+      const printerName = await printPickupLabelWithZebra({
+        orderNumber: selectedRequest.salesOrder,
+        customer: selectedRequest.customer,
+        separationDate: formatLabelDate(selectedRequest.separationDate),
+        equipmentQuantity: String(selectedRequest.equipmentQuantity),
+        chipQuantity: String(selectedRequest.chipQuantity),
+      }, signaturePageUrl);
+      setPrintSuccess(`Etiqueta enviada para ${printerName}.`);
+    } catch (printFailure) {
+      console.error('Falha ao imprimir etiqueta na Zebra:', printFailure);
+      setPrintError(printFailure instanceof Error
+        ? printFailure.message
+        : 'Não foi possível enviar a etiqueta para a impressora Zebra.');
+    } finally {
+      setIsPrintingLabel(false);
+    }
+  };
+
   const normalizedFilter = normalizePickupFilter(filterText.trim());
   const filteredRequests = requests.filter(({ request }) => {
     const searchableText = [
@@ -482,9 +517,17 @@ export function PickupSignatureTab() {
                   </div>
                 </div>
               </div>
-              <button type="button" onClick={() => window.print()} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-gray-50">
-                Imprimir QR Code
+              <button type="button" onClick={() => void handlePrintLabel()} disabled={isPrintingLabel}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60">
+                <Printer className="h-4 w-4" />
+                {isPrintingLabel ? 'Enviando para Zebra...' : 'Imprimir etiqueta Zebra'}
               </button>
+              {printError && (
+                <p role="alert" className="max-w-sm text-center text-xs text-red-700">{printError}</p>
+              )}
+              {printSuccess && (
+                <p role="status" className="max-w-sm text-center text-xs text-emerald-700">{printSuccess}</p>
+              )}
             </div>
           ) : selectedRequest ? (
             <div role="alert" className="flex min-h-60 flex-col items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-4 text-center">

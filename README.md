@@ -34,4 +34,10 @@ O script `pickup-signatures.sql` também habilita a lista compartilhada de retir
 
 Na aba **Retirada pelo tablet**, a Produção pode localizar uma retirada pendente pelo pedido ou cliente e abrir diretamente a página de conferência e assinatura, sem escanear o QR. Os registros precisam ter sido criados previamente na aba **Assinatura da retirada**; após assinados, deixam de aparecer como pendentes no painel do tablet.
 
+### Impressão direta de etiquetas Zebra
+
+O botão **Imprimir etiqueta Zebra** envia uma única etiqueta ZPL em pé (65 × 95 mm) diretamente para a Zebra ZD230, com velocidade 4 e obscuridade 30. Não usa a janela de impressão do navegador.
+
+Para habilitar a impressão, instale o Zebra Browser Print oficial no computador conectado à impressora, defina a ZD230 como impressora padrão no Browser Print e obtenha o SDK JavaScript incluído no pacote oficial. Coloque o arquivo `BrowserPrint-3.1.250.min.js` em `public/vendor/BrowserPrint-3.1.250.min.js` antes de compilar/publicar. Cada computador que imprimir precisa manter o Browser Print instalado e em execução; a impressão não pode ser encaminhada diretamente do GitHub Pages à impressora sem esse serviço local. Se o SDK ou o serviço não estiver disponível, a tela informa a causa e não apresenta um falso aviso de sucesso.
+
 **Atenção:** `supabase/schema.sql` configura `warehouse_state` e a lista de retiradas para leitura e alteração públicas, sem login. Qualquer pessoa com acesso ao site pode consultar e modificar o estoque, as movimentações e os registros de retirada. Execute o schema completo somente se esse nível de acesso for aceitável para a empresa.
