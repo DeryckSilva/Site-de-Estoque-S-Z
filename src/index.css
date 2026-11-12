@@ -134,14 +134,14 @@
 
 @media print {
   @page {
-    size: 95mm 65mm;
+    size: 65mm 95mm;
     margin: 0;
   }
 
   html,
   body {
-    width: 95mm !important;
-    height: 65mm !important;
+    width: 65mm !important;
+    height: 95mm !important;
     margin: 0 !important;
     padding: 0 !important;
     overflow: hidden !important;
@@ -149,10 +149,10 @@
 
   #root {
     position: relative !important;
-    width: 95mm !important;
-    height: 65mm !important;
+    width: 65mm !important;
+    height: 95mm !important;
     min-height: 0 !important;
-    max-height: 65mm !important;
+    max-height: 95mm !important;
     overflow: hidden !important;
   }
 
@@ -178,6 +178,8 @@
     max-width: none;
     aspect-ratio: auto;
     margin: 0 !important;
+    transform: translateX(65mm) rotate(90deg);
+    transform-origin: top left;
     border: 0.3mm solid #111 !important;
     border-radius: 3mm !important;
     box-shadow: none !important;
