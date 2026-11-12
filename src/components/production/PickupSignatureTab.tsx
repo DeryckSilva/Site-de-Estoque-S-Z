@@ -83,6 +83,11 @@ function formatSignatureDate(date: string): string {
   return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleString('pt-BR');
 }
 
+function formatLabelDate(date: string): string {
+  const parsed = new Date(`${date}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString('pt-BR');
+}
+
 export function PickupSignatureTab() {
   const [orders, setOrders] = useState<ProductionOrder[]>(readPanelProductionOrders);
   const [selectedOrderId, setSelectedOrderId] = useState(orders[0]?.id ?? '');
@@ -440,25 +445,37 @@ export function PickupSignatureTab() {
             )}
           </div>
           {selectedRequest && sharedPickupClient ? (
-            <div id="pickup-signature-qr-print" className="flex flex-col items-center rounded-lg border border-gray-100 bg-white p-4 text-center">
-              <QRCodeSVG
-                value={signaturePageUrl}
-                size={280}
-                level="M"
-                includeMargin
-                bgColor="#ffffff"
-                fgColor="#000000"
-                title={`Consulta da retirada ${getRecordTypeLabel(selectedRequest.recordType)} ${selectedRequest.salesOrder}`}
-              />
-              <p className="mt-3 text-sm font-bold text-slate-900">
-                {selectedRequest.recordType === 'order' || !selectedRequest.recordType
-                  ? selectedRequest.orderCode
-                  : getRecordTypeLabel(selectedRequest.recordType)}
-              </p>
-              <p className="text-xs text-gray-600">{selectedRequest.customer} · {selectedRequest.equipmentQuantity} equipamento(s)</p>
-              <p className="mt-1 text-[10px] text-gray-500">Código da campanha: {selectedRequest.campaignCode}</p>
-              <p className="mt-2 break-all text-[10px] text-gray-400">{signaturePageUrl}</p>
-              <button type="button" onClick={() => window.print()} className="mt-3 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-gray-50">
+            <div className="flex flex-col items-center gap-3">
+              <div id="pickup-signature-qr-print" className="pickup-label">
+                <div className="pickup-label-header">
+                  <QRCodeSVG
+                    className="pickup-label-qr"
+                    value={signaturePageUrl}
+                    size={280}
+                    level="M"
+                    includeMargin
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    title={`Consulta da retirada ${getRecordTypeLabel(selectedRequest.recordType)} ${selectedRequest.salesOrder}`}
+                  />
+                  <div className="pickup-label-order">
+                    <span className="pickup-label-caption">Nº do pedido</span>
+                    <strong className="pickup-label-order-number">{selectedRequest.salesOrder}</strong>
+                    <div className="pickup-label-date">
+                      <span className="pickup-label-caption">Data de separação</span>
+                      <strong>{formatLabelDate(selectedRequest.separationDate)}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="pickup-label-details">
+                  <strong className="pickup-label-customer">{selectedRequest.customer}</strong>
+                  <div className="pickup-label-quantities">
+                    <span>Equipamentos: <strong>{selectedRequest.equipmentQuantity}</strong></span>
+                    <span>Chips: <strong>{selectedRequest.chipQuantity}</strong></span>
+                  </div>
+                </div>
+              </div>
+              <button type="button" onClick={() => window.print()} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-gray-50">
                 Imprimir QR Code
               </button>
             </div>
