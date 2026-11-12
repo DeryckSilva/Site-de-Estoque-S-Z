@@ -117,12 +117,6 @@ function getDefaultZebraPrinter(
           reject(new Error('Nenhuma impressora padrão foi encontrada pelo Zebra Browser Print.'));
           return;
         }
-        if (!device.name.toLocaleLowerCase().includes('zd230')) {
-          reject(new Error(
-            `A impressora padrão é "${device.name}". Defina a Zebra ZD230 como impressora padrão no Browser Print para imprimir esta etiqueta.`
-          ));
-          return;
-        }
         resolve(device);
       },
       (error) => reject(new Error(
