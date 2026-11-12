@@ -36,7 +36,7 @@ Na aba **Retirada pelo tablet**, a Produção pode localizar uma retirada penden
 
 ### Impressão direta de etiquetas Zebra
 
-O botão **Imprimir etiqueta Zebra** envia uma única etiqueta ZPL em pé (65 × 95 mm) diretamente para a Zebra ZD230, com velocidade 4 e obscuridade 30. Não usa a janela de impressão do navegador.
+O botão **Imprimir etiqueta Zebra** envia uma única etiqueta ZPL em pé (65 × 95 mm) diretamente para a Zebra ZD230, com a composição horizontal da prévia girada 90° para caber na etiqueta, velocidade 4 e obscuridade 30. Não usa a janela de impressão do navegador.
 
 O SDK JavaScript `BrowserPrint-3.1.250.min.js`, obtido do pacote oficial da Zebra, já está incluído em `public/vendor`. Em cada computador conectado a uma impressora, instale e mantenha o Zebra Browser Print em execução e selecione a impressora desejada como padrão. A impressão não pode ser encaminhada diretamente do GitHub Pages à impressora sem esse serviço local. Se o SDK ou o serviço não estiver disponível, a tela informa a causa e não apresenta um falso aviso de sucesso.
 

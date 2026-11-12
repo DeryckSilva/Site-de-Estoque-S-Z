@@ -249,13 +249,19 @@ export function PickupSignatureTab() {
     setPrintError('');
     setPrintSuccess('');
     try {
+      const qrCodeSvg = document.querySelector<SVGSVGElement>(
+        '#pickup-signature-qr-print .pickup-label-qr'
+      );
+      if (!qrCodeSvg) {
+        throw new Error('O QR Code ainda não está pronto para impressão. Tente novamente.');
+      }
       const printerName = await printPickupLabelWithZebra({
         orderNumber: selectedRequest.salesOrder,
         customer: selectedRequest.customer,
         separationDate: formatLabelDate(selectedRequest.separationDate),
         equipmentQuantity: String(selectedRequest.equipmentQuantity),
         chipQuantity: String(selectedRequest.chipQuantity),
-      }, signaturePageUrl);
+      }, qrCodeSvg);
       setPrintSuccess(`Etiqueta enviada para ${printerName}.`);
     } catch (printFailure) {
       console.error('Falha ao imprimir etiqueta na Zebra:', printFailure);

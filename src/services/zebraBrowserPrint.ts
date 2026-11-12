@@ -70,37 +70,207 @@ function loadBrowserPrintSdk(): Promise<ZebraBrowserPrintApi> {
   return sdkPromise;
 }
 
-function encodeZplField(value: string): string {
-  const safeValue = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
-  return Array.from(new TextEncoder().encode(safeValue), (byte) =>
-    `_${byte.toString(16).padStart(2, '0').toUpperCase()}`
-  ).join('');
+function loadQrImage(qrCodeSvg: SVGSVGElement): Promise<HTMLImageElement> {
+  const serializedSvg = new XMLSerializer().serializeToString(qrCodeSvg);
+  const svgWithNamespace = serializedSvg.includes('xmlns=')
+    ? serializedSvg
+    : serializedSvg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  const imageUrl = URL.createObjectURL(new Blob([svgWithNamespace], {
+    type: 'image/svg+xml;charset=utf-8',
+  }));
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(imageUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(imageUrl);
+      reject(new Error('Não foi possível preparar o QR Code para impressão.'));
+    };
+    image.src = imageUrl;
+  });
 }
 
-export function createPickupLabelZpl(data: PickupZebraLabelData, signatureUrl: string): string {
+function wrapText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number
+): string[] {
+  const words = text.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().split(/\s+/);
+  const lines: string[] = [];
+  let line = '';
+
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (context.measureText(candidate).width <= maxWidth || !line) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      if (lines.length === maxLines) return lines;
+      line = word;
+    }
+  }
+
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines;
+}
+
+function drawWrappedText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number
+): void {
+  wrapText(context, text, maxWidth, maxLines).forEach((line, index) => {
+    context.fillText(line, x, y + index * lineHeight, maxWidth);
+  });
+}
+
+function drawLabelLandscape(
+  data: PickupZebraLabelData,
+  qrImage: HTMLImageElement
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 760;
+  canvas.height = 520;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('O navegador não conseguiu preparar a etiqueta para impressão.');
+
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = '#111';
+  context.lineWidth = 3;
+  context.beginPath();
+  context.roundRect(2, 2, 756, 516, 20);
+  context.stroke();
+  context.imageSmoothingEnabled = false;
+  context.drawImage(qrImage, 20, 20, 296, 296);
+
+  const textX = 332;
+  const textWidth = 408;
+  context.fillStyle = '#111';
+  context.textBaseline = 'top';
+  context.font = '800 22px Arial, sans-serif';
+  context.fillText('RETIRADA · PRODUÇÃO', textX, 22, textWidth);
+  context.fillStyle = '#555';
+  context.font = '700 23px Arial, sans-serif';
+  context.fillText('Nº DO PEDIDO', textX, 56, textWidth);
+  context.fillStyle = '#111';
+  context.font = '800 40px Arial, sans-serif';
+  drawWrappedText(context, data.orderNumber, textX, 82, textWidth, 44, 2);
+
+  context.strokeStyle = '#aaa';
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(textX, 164);
+  context.lineTo(textX + textWidth, 164);
+  context.stroke();
+  context.fillStyle = '#555';
+  context.font = '700 23px Arial, sans-serif';
+  context.fillText('DATA DE SEPARAÇÃO', textX, 176, textWidth);
+  context.fillStyle = '#111';
+  context.font = '700 30px Arial, sans-serif';
+  context.fillText(data.separationDate, textX, 207, textWidth);
+
+  context.strokeStyle = '#111';
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(20, 330);
+  context.lineTo(740, 330);
+  context.stroke();
+
+  context.fillStyle = '#111';
+  context.font = '800 40px Arial, sans-serif';
+  drawWrappedText(context, data.customer, 20, 350, 720, 42, 2);
+
+  const quantityY = 444;
+  const quantityHeight = 62;
+  const quantityWidth = 352;
+  const quantityBoxes = [
+    { x: 20, label: 'EQUIPAMENTOS', value: data.equipmentQuantity },
+    { x: 388, label: 'CHIPS', value: data.chipQuantity },
+  ];
+
+  for (const box of quantityBoxes) {
+    context.strokeStyle = '#111';
+    context.lineWidth = 2;
+    context.strokeRect(box.x, quantityY, quantityWidth, quantityHeight);
+    context.fillStyle = '#111';
+    context.font = '700 22px Arial, sans-serif';
+    context.fillText(box.label, box.x + 14, quantityY + 10, quantityWidth - 28);
+    context.font = '800 36px Arial, sans-serif';
+    context.fillText(box.value, box.x + 14, quantityY + 34, quantityWidth - 28);
+  }
+
+  return canvas;
+}
+
+function rotateLabelToPortrait(landscapeCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const portraitCanvas = document.createElement('canvas');
+  portraitCanvas.width = 520;
+  portraitCanvas.height = 760;
+  const context = portraitCanvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('O navegador não conseguiu girar a etiqueta para impressão.');
+
+  context.translate(portraitCanvas.width, 0);
+  context.rotate(Math.PI / 2);
+  context.drawImage(landscapeCanvas, 0, 0);
+  return portraitCanvas;
+}
+
+function canvasToZplGraphic(canvas: HTMLCanvasElement): string {
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('O navegador não conseguiu converter a etiqueta para ZPL.');
+
+  const { data: pixels } = context.getImageData(0, 0, canvas.width, canvas.height);
+  const bytesPerRow = Math.ceil(canvas.width / 8);
+  const hexadecimalBytes: string[] = [];
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let byteColumn = 0; byteColumn < bytesPerRow; byteColumn += 1) {
+      let value = 0;
+      for (let bit = 0; bit < 8; bit += 1) {
+        const x = byteColumn * 8 + bit;
+        if (x >= canvas.width) continue;
+        const pixelOffset = (y * canvas.width + x) * 4;
+        const darkness = 255 - (
+          pixels[pixelOffset] * 0.299 +
+          pixels[pixelOffset + 1] * 0.587 +
+          pixels[pixelOffset + 2] * 0.114
+        );
+        if (darkness >= 128) value |= 1 << (7 - bit);
+      }
+      hexadecimalBytes.push(value.toString(16).padStart(2, '0').toUpperCase());
+    }
+  }
+
+  const totalBytes = bytesPerRow * canvas.height;
+  return `^GFA,${totalBytes},${totalBytes},${bytesPerRow},${hexadecimalBytes.join('')}^FS`;
+}
+
+export async function createPickupLabelZpl(
+  data: PickupZebraLabelData,
+  qrCodeSvg: SVGSVGElement
+): Promise<string> {
+  const qrImage = await loadQrImage(qrCodeSvg);
+  const landscapeLabel = drawLabelLandscape(data, qrImage);
+  const portraitLabel = rotateLabelToPortrait(landscapeLabel);
+  const graphic = canvasToZplGraphic(portraitLabel);
+
   return [
     '^XA',
-    '^CI28',
     '^PW520',
     '^LL760',
     '^LH0,0',
     '^PR4',
     '~SD30',
-    '^FO20,20^GB480,275,2^FS',
-    `^FO32,32^BQN,2,4^FH_^FDQA,${encodeZplField(signatureUrl)}^FS`,
-    `^FO270,38^A0N,20,18^FH_^FD${encodeZplField('ETIQUETA DE RETIRADA')}^FS`,
-    `^FO270,78^A0N,18,17^FH_^FD${encodeZplField('Nº DO PEDIDO')}^FS`,
-    `^FO270,105^A0N,30,22^FB215,2,0,L,0^FH_^FD${encodeZplField(data.orderNumber)}^FS`,
-    `^FO270,185^A0N,18,17^FH_^FD${encodeZplField('DATA DE SEPARAÇÃO')}^FS`,
-    `^FO270,212^A0N,24,21^FB215,2,0,L,0^FH_^FD${encodeZplField(data.separationDate)}^FS`,
-    '^FO20,315^GB480,3,3^FS',
-    `^FO20,338^A0N,36,31^FB480,2,2,L,0^FH_^FD${encodeZplField(data.customer)}^FS`,
-    '^FO20,470^GB232,250,2^FS',
-    '^FO268,470^GB232,250,2^FS',
-    `^FO35,495^A0N,20,18^FH_^FD${encodeZplField('EQUIPAMENTOS')}^FS`,
-    `^FO35,545^A0N,52,45^FB200,2,0,L,0^FH_^FD${encodeZplField(data.equipmentQuantity)}^FS`,
-    `^FO283,495^A0N,20,18^FH_^FD${encodeZplField('CHIPS')}^FS`,
-    `^FO283,545^A0N,52,45^FB200,2,0,L,0^FH_^FD${encodeZplField(data.chipQuantity)}^FS`,
+    `^FO0,0${graphic}`,
     '^PQ1',
     '^XZ',
   ].join('\n');
@@ -128,11 +298,11 @@ function getDefaultZebraPrinter(
 
 export async function printPickupLabelWithZebra(
   data: PickupZebraLabelData,
-  signatureUrl: string
+  qrCodeSvg: SVGSVGElement
 ): Promise<string> {
   const browserPrint = await loadBrowserPrintSdk();
   const printer = await getDefaultZebraPrinter(browserPrint);
-  const zpl = createPickupLabelZpl(data, signatureUrl);
+  const zpl = await createPickupLabelZpl(data, qrCodeSvg);
 
   await new Promise<void>((resolve, reject) => {
     printer.send(zpl, resolve, (error) => {
