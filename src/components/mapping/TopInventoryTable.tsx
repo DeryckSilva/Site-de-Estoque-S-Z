@@ -17,13 +17,14 @@ interface TopInventoryTableProps {
   onAddCustomColumn: (title: string) => void;
   onCustomValueChange: (columnId: string, itemId: string, value: number) => void;
   onAddItem: (name: string, targetColumnId: string) => void;
+  onDeleteItem: (itemId: string) => void;
 }
 
 export const TopInventoryTable: React.FC<TopInventoryTableProps> = ({
   rows, groupSummaries, painelAbertos, onStockChange, onItemNameChange,
   layoutColumns, customColumns, customColumnValues, onMoveItem,
   onAddLayoutColumn, onDeleteLayoutColumn, onAddCustomColumn, onCustomValueChange,
-  onAddItem,
+  onAddItem, onDeleteItem,
 }) => {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [newItemName, setNewItemName] = useState('');
@@ -68,7 +69,19 @@ export const TopInventoryTable: React.FC<TopInventoryTableProps> = ({
         <td className="w-24 border-r border-slate-200 px-1">{numberInput(row.item.id, 'compraRealizada', row.compraRealizada)}</td>
         <td className={`w-28 border-r border-slate-200 text-center font-mono font-bold ${afterNegative ? 'bg-red-100 text-red-700' : 'bg-blue-50/60 text-blue-900'}`}>{row.saldoPosEntrega}</td>
         {customColumns.map((column) => <td key={column.id} className="w-24 border-r border-slate-200 px-1">{numberInput(row.item.id, 'quantidade', customColumnValues[column.id]?.[row.item.id] || 0, (itemId, _field, value) => onCustomValueChange(column.id, itemId, value))}</td>)}
-        <td className="w-7 px-1 text-center"><GripVertical className="mx-auto h-3.5 w-3.5 text-slate-300" /></td>
+        <td className="w-7 px-1 text-center">
+          {row.item.id.startsWith('item-') && (
+            <button
+              type="button"
+              onClick={() => onDeleteItem(row.item.id)}
+              title={`Excluir ${row.item.name}`}
+              aria-label={`Excluir ${row.item.name}`}
+              className="rounded p-1 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </td>
       </tr>
     );
   };

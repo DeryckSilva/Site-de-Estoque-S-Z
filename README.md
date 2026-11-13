@@ -2,6 +2,8 @@
 
 Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas de equipamentos para produção.
 
+No **Mapeamento de Produção**, itens adicionados manualmente podem ser excluídos e **Baixar Excel** exporta o estoque agrupado junto com o mini-relatório de chips. Os valores do mini-relatório são editáveis e ficam salvos no navegador.
+
 ## Desenvolvimento local
 
 Requisitos: Node.js 22 ou superior.

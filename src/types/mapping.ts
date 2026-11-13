@@ -29,6 +29,14 @@ export interface EquipmentStockValues {
   compraRealizada: number;
 }
 
+export interface ChipReportRow {
+  operadora: string;
+  saldoFisico: number;
+  comPedido: number;
+  semPedido: number;
+  entregueProducao: number;
+}
+
 export interface OrderItem {
   id: string;
   numPed: string;

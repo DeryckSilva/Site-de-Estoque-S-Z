@@ -10,6 +10,7 @@ import {
   MappingCustomColumn,
   MappingLayoutColumn,
   EquipmentItem,
+  ChipReportRow,
 } from '../../types/mapping';
 import { BaseOrder } from '../../types/orders';
 import { ProductionOrder } from '../../types/production';
@@ -40,9 +41,18 @@ import {
 } from 'lucide-react';
 import { RefreshCw } from 'lucide-react';
 import { loadAttendedOrderNumbers } from '../../services/googleSheetOrders';
+import { downloadMappingExcel } from '../../utils/mappingExcelExport';
 
 const STORAGE_KEY = 'kiraso_production_mapping_v1';
+const CHIP_REPORT_STORAGE_KEY = `${STORAGE_KEY}_chips`;
 const STOCK_DEFAULTS_VERSION = '2026-09-21-balances-01';
+
+const INITIAL_CHIP_REPORT_ROWS: ChipReportRow[] = [
+  { operadora: 'ESEYE', saldoFisico: 943, comPedido: 1167, semPedido: 0, entregueProducao: 526 },
+  { operadora: 'CLARO', saldoFisico: 630, comPedido: 0, semPedido: 0, entregueProducao: 0 },
+  { operadora: 'VIVO', saldoFisico: 385, comPedido: 0, semPedido: 0, entregueProducao: 0 },
+  { operadora: 'ALLCOM', saldoFisico: 0, comPedido: 0, semPedido: 0, entregueProducao: 0 },
+];
 
 const DEFAULT_LAYOUT_COLUMNS: MappingLayoutColumn[] = [
   { id: 'isca-2g', title: 'Isca 2G', group: 'ISCA 2G', itemIds: EQUIPMENT_ITEMS.filter((item) => item.group === 'ISCA 2G').map((item) => item.id), locked: true },
@@ -89,6 +99,26 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       return saved ? JSON.parse(saved) : INITIAL_SEM_PEDIDO;
     } catch {
       return INITIAL_SEM_PEDIDO;
+    }
+  });
+
+  const [chipReportRows, setChipReportRows] = useState<ChipReportRow[]>(() => {
+    try {
+      const saved = localStorage.getItem(CHIP_REPORT_STORAGE_KEY);
+      if (!saved) return INITIAL_CHIP_REPORT_ROWS;
+      const parsed = JSON.parse(saved) as ChipReportRow[];
+      return INITIAL_CHIP_REPORT_ROWS.map((initialRow) => {
+        const savedRow = parsed.find((row) => row.operadora === initialRow.operadora);
+        return savedRow ? {
+          ...initialRow,
+          saldoFisico: Number(savedRow.saldoFisico) || 0,
+          comPedido: Number(savedRow.comPedido) || 0,
+          semPedido: Number(savedRow.semPedido) || 0,
+          entregueProducao: Number(savedRow.entregueProducao) || 0,
+        } : initialRow;
+      });
+    } catch {
+      return INITIAL_CHIP_REPORT_ROWS;
     }
   });
 
@@ -161,6 +191,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       localStorage.setItem(`${STORAGE_KEY}_layout`, JSON.stringify(layoutColumns));
       localStorage.setItem(`${STORAGE_KEY}_columns`, JSON.stringify(customColumns));
       localStorage.setItem(`${STORAGE_KEY}_extra_items`, JSON.stringify(extraItems));
+      localStorage.setItem(CHIP_REPORT_STORAGE_KEY, JSON.stringify(chipReportRows));
 
       // Synchronize with Ordens de Produção ("A atender" panel)
       syncMappingToProductionOrders(orders, deliveries);
@@ -168,7 +199,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     } catch (err) {
       console.error('Falha ao salvar no localStorage:', err);
     }
-  }, [stockValues, orders, semPedidoEntries, deliveries, itemNameOverrides, layoutColumns, customColumns, customColumnValues, extraItems]);
+  }, [stockValues, orders, semPedidoEntries, deliveries, itemNameOverrides, layoutColumns, customColumns, customColumnValues, extraItems, chipReportRows]);
 
   useEffect(() => {
     const reloadMappingOrders = () => {
@@ -236,7 +267,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
         ...baseItem,
         name: itemNameOverrides[baseItem.id] || baseItem.name,
       };
-      // 1. Comprometidas Com pedido = sum of quantities in bottom-left table matching this item
+      // 1. Comprometidas com pedido = sum of active orders matching this item
       const comPedido = orders
         .filter((o) => o.itemId === item.id)
         .reduce((sum, o) => sum + (Number(o.quantidade) || 0), 0);
@@ -458,6 +489,69 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     showNotification(`Item "${name}" adicionado ao quadro.`);
   };
 
+  const handleDeleteItem = (itemId: string) => {
+    const item = extraItems.find((candidate) => candidate.id === itemId);
+    if (!item || !itemId.startsWith('item-')) return;
+
+    if (orders.some((order) => order.itemId === itemId) ||
+      semPedidoEntries.some((entry) => entry.itemId === itemId)) {
+      showNotification(`Não é possível excluir "${item.name}" porque há compromissos vinculados.`);
+      return;
+    }
+
+    if (!window.confirm(`Excluir o item "${item.name}"?`)) return;
+
+    setExtraItems((current) => current.filter((candidate) => candidate.id !== itemId));
+    setLayoutColumns((current) => current.map((column) => ({
+      ...column,
+      itemIds: column.itemIds.filter((id) => id !== itemId),
+    })));
+    setStockValues((current) => {
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
+    setItemNameOverrides((current) => {
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
+    setCustomColumnValues((current) => Object.fromEntries(
+      Object.entries(current).map(([columnId, values]) => {
+        const nextValues = { ...values };
+        delete nextValues[itemId];
+        return [columnId, nextValues];
+      })
+    ));
+    showNotification(`Item "${item.name}" excluído.`);
+  };
+
+  const handleChipReportChange = (
+    operadora: string,
+    field: Exclude<keyof ChipReportRow, 'operadora'>,
+    value: number
+  ) => {
+    setChipReportRows((current) => current.map((row) => (
+      row.operadora === operadora ? { ...row, [field]: value } : row
+    )));
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      await downloadMappingExcel({
+        rows: calculatedRows,
+        layoutColumns,
+        customColumns,
+        customColumnValues,
+        chipReportRows,
+      });
+      showNotification('Arquivo Excel gerado com o mapeamento e o relatório de chips.');
+    } catch (exportError) {
+      console.error('Falha ao exportar o mapeamento para Excel:', exportError);
+      showNotification('Não foi possível gerar o arquivo Excel.');
+    }
+  };
+
   const handleCustomValueChange = (columnId: string, itemId: string, value: number) => {
     setCustomColumnValues((prev) => ({ ...prev, [columnId]: { ...prev[columnId], [itemId]: value } }));
   };
@@ -499,6 +593,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       setOrders(INITIAL_ORDERS);
       setSemPedidoEntries(INITIAL_SEM_PEDIDO);
       setDeliveries(INITIAL_DELIVERIES);
+      setChipReportRows(INITIAL_CHIP_REPORT_ROWS);
       setItemNameOverrides({});
       setLayoutColumns(DEFAULT_LAYOUT_COLUMNS);
       setCustomColumns([]);
@@ -512,6 +607,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       localStorage.removeItem(`${STORAGE_KEY}_layout`);
       localStorage.removeItem(`${STORAGE_KEY}_columns`);
       localStorage.removeItem(`${STORAGE_KEY}_extra_items`);
+      localStorage.removeItem(CHIP_REPORT_STORAGE_KEY);
       showNotification('Mapeamento restaurado para os dados originais da planilha!');
     }
   };
@@ -523,6 +619,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       orders,
       semPedidoEntries,
       deliveries,
+      chipReportRows,
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -540,6 +637,12 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
   const totalSemPedido = calculatedRows.reduce((acc, r) => acc + r.semPedido, 0);
   const totalSaldoReal = calculatedRows.reduce((acc, r) => acc + r.saldoReal, 0);
   const totalPosEntrega = calculatedRows.reduce((acc, r) => acc + r.saldoPosEntrega, 0);
+  const chipReportTotals = chipReportRows.reduce((total, row) => ({
+    saldoFisico: total.saldoFisico + row.saldoFisico,
+    comPedido: total.comPedido + row.comPedido,
+    semPedido: total.semPedido + row.semPedido,
+    entregueProducao: total.entregueProducao + row.entregueProducao,
+  }), { saldoFisico: 0, comPedido: 0, semPedido: 0, entregueProducao: 0 });
 
   return (
     <div className="w-full space-y-4">
@@ -595,6 +698,15 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
             </button>
           )}
           <button
+            type="button"
+            onClick={() => void handleExportExcel()}
+            title="Baixar o mapeamento e o mini-relatório de chips em Excel"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 shadow-xs transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Baixar Excel</span>
+          </button>
+          <button
             onClick={handleExportData}
             title="Exportar backup dos dados atuais em JSON"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
@@ -628,7 +740,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
           <div className="mt-1 text-xl font-bold text-blue-700 font-mono">
             {totalComPedido.toLocaleString('pt-BR')}
           </div>
-          <div className="text-[10px] text-slate-400">Soma Tabela Inferior Esq.</div>
+          <div className="text-[10px] text-slate-400">Total de pedidos ativos</div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -673,7 +785,81 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
           onAddCustomColumn={handleAddCustomColumn}
           onCustomValueChange={handleCustomValueChange}
           onAddItem={handleAddItem}
+          onDeleteItem={handleDeleteItem}
         />
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <h2 className="text-sm font-bold text-slate-900">Mini relatório de chips</h2>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Saldo real = físico − comprometidas + entregues na Produção. Os campos são editáveis e salvos automaticamente neste navegador.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[780px] border-collapse text-left text-xs">
+            <thead>
+              <tr className="bg-[#0e2a47] text-[10px] font-semibold uppercase tracking-wide text-white">
+                <th className="border-r border-slate-500 px-3 py-2 text-left">Operadora</th>
+                <th className="border-r border-slate-500 px-2 py-2 text-center">Saldo físico</th>
+                <th className="border-r border-slate-500 px-2 py-2 text-center">Comprometidas com pedido</th>
+                <th className="border-r border-slate-500 px-2 py-2 text-center">Comprometidas sem pedido</th>
+                <th className="border-r border-slate-500 px-2 py-2 text-center">Entregues na Produção</th>
+                <th className="px-2 py-2 text-center">Saldo disponível real</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chipReportRows.map((row) => {
+                const saldoReal = row.saldoFisico - row.comPedido - row.semPedido + row.entregueProducao;
+                const numericFields: Array<{
+                  key: Exclude<keyof ChipReportRow, 'operadora'>;
+                  value: number;
+                }> = [
+                  { key: 'saldoFisico', value: row.saldoFisico },
+                  { key: 'comPedido', value: row.comPedido },
+                  { key: 'semPedido', value: row.semPedido },
+                  { key: 'entregueProducao', value: row.entregueProducao },
+                ];
+                return (
+                  <tr key={row.operadora} className="border-b border-slate-200 text-slate-800">
+                    <td className="px-3 py-2 font-semibold">{row.operadora}</td>
+                    {numericFields.map(({ key, value }) => (
+                      <td key={key} className="border-l border-slate-100 px-2 py-1">
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={value}
+                          aria-label={`${row.operadora} ${key}`}
+                          onChange={(event) => handleChipReportChange(
+                            row.operadora,
+                            key,
+                            Number(event.target.value) || 0
+                          )}
+                          className="w-full rounded border border-transparent bg-amber-50/60 px-1 py-1 text-center font-mono font-semibold outline-none hover:border-blue-300 focus:border-blue-500 focus:bg-white"
+                        />
+                      </td>
+                    ))}
+                    <td className={`border-l border-slate-100 px-2 py-2 text-center font-mono font-bold ${saldoReal < 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+                      {saldoReal}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-blue-100/70 font-bold text-slate-900">
+                <td className="px-3 py-2">TOTAL CHIPS</td>
+                <td className="px-2 py-2 text-center">{chipReportTotals.saldoFisico}</td>
+                <td className="px-2 py-2 text-center">{chipReportTotals.comPedido}</td>
+                <td className="px-2 py-2 text-center">{chipReportTotals.semPedido}</td>
+                <td className="px-2 py-2 text-center">{chipReportTotals.entregueProducao}</td>
+                <td className="px-2 py-2 text-center">
+                  {chipReportTotals.saldoFisico - chipReportTotals.comPedido -
+                    chipReportTotals.semPedido + chipReportTotals.entregueProducao}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
     </div>
