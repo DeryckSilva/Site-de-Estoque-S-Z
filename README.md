@@ -4,7 +4,7 @@ Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas de 
 
 No **Mapeamento de Produção**, qualquer item pode ser removido do quadro e restaurado depois; pedidos, entregas e estoque histórico são preservados. **Baixar Excel** exporta o estoque visível agrupado junto com o mini-relatório de chips. Os valores do mini-relatório são editáveis e ficam salvos no navegador.
 
-A aba **Separação de pedidos** registra cada pedido e seus equipamentos, seriais, CCIDs/chips, acessórios, responsáveis e datas. O controle é compartilhado em tempo real pelo Supabase configurado para o WMS.
+A aba **Separação de pedidos** busca os dados disponíveis ao informar o número do pedido, permite revisar/editar os campos e registrar equipamentos, seriais, CCIDs/chips, acessórios, responsáveis e datas. O controle é compartilhado em tempo real pelo Supabase configurado para o WMS.
 
 ## Desenvolvimento local
 

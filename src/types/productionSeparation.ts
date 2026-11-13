@@ -18,10 +18,24 @@ export interface SeparatedEquipment {
   productionResponsible: string;
 }
 
+export interface SeparationOrderDetails {
+  requestedQuantity: number;
+  productType: string;
+  operator: string;
+  equipmentModel: string;
+  modelVariation: string;
+  colorVariation: string;
+  businessType: string;
+  deliveryType: string;
+  requestDate: string;
+  expectedDeliveryDate: string;
+}
+
 export interface ProductionSeparationRecord {
   id: string;
   orderNumber: string;
   clientName: string;
+  orderDetails?: SeparationOrderDetails;
   separatedBy: string;
   deliveryResponsible: string;
   separationDate: string;

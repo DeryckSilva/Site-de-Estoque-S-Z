@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ClipboardCheck, Plus, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
+import { ORDERS_DATABASE } from '../../data/ordersDatabase';
+import { loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
 import { sharedWmsClient } from '../../services/sharedWmsStore';
 import {
   createProductionSeparation,
@@ -10,9 +12,11 @@ import {
 } from '../../services/productionSeparationService';
 import type {
   ProductionSeparationRecord,
+  SeparationOrderDetails,
   SeparatedEquipment,
   SharedProductionSeparation,
 } from '../../types/productionSeparation';
+import type { BaseOrder } from '../../types/orders';
 
 type TextEquipmentField = keyof Pick<
   SeparatedEquipment,
@@ -57,18 +61,31 @@ const NUMBER_EQUIPMENT_FIELDS: Array<{ key: NumberEquipmentField; label: string 
   { key: 'magnetQuantity', label: 'Qtd. ímãs' },
 ];
 
+const EMPTY_ORDER_DETAILS: SeparationOrderDetails = {
+  requestedQuantity: 0,
+  productType: '',
+  operator: '',
+  equipmentModel: '',
+  modelVariation: '',
+  colorVariation: '',
+  businessType: '',
+  deliveryType: '',
+  requestDate: '',
+  expectedDeliveryDate: '',
+};
+
 function localDate(): string {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
-function createEmptyEquipment(): SeparatedEquipment {
+function createEmptyEquipment(details: SeparationOrderDetails = EMPTY_ORDER_DETAILS): SeparatedEquipment {
   return {
     id: crypto.randomUUID(),
-    equipmentType: '',
+    equipmentType: details.equipmentModel || '',
     serialNumber: '',
     ccid: '',
-    terminalColor: '',
+    terminalColor: details.colorVariation || '',
     terminalSize: '',
     terminalDiameter: '',
     terminalQuantity: 0,
@@ -86,6 +103,25 @@ function createEmptyEquipment(): SeparatedEquipment {
 
 function createId(): string {
   return crypto.randomUUID();
+}
+
+function normalizeOrderNumber(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
+}
+
+function getOrderDetails(order: BaseOrder): SeparationOrderDetails {
+  return {
+    requestedQuantity: order.quantidade || 0,
+    productType: order.tipoItem || '',
+    operator: order.operadora || '',
+    equipmentModel: order.geracao || order.mappedItemName || '',
+    modelVariation: order.modeloVariacao || '',
+    colorVariation: order.corVariacao || '',
+    businessType: order.tipoNegocio || '',
+    deliveryType: order.tipoEntrega || '',
+    requestDate: order.dataSolicitacao || '',
+    expectedDeliveryDate: order.dataEnvio || '',
+  };
 }
 
 function inputClass(): string {
@@ -116,6 +152,38 @@ function HeaderField({
         className={inputClass()}
       />
     </label>
+  );
+}
+
+function OrderDetailsFields({
+  details,
+  onChange,
+}: {
+  details: SeparationOrderDetails;
+  onChange: (details: SeparationOrderDetails) => void;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <label className="block text-xs font-medium text-slate-600">
+        Quantidade solicitada
+        <input
+          type="number"
+          min="0"
+          value={details.requestedQuantity}
+          onChange={(event) => onChange({ ...details, requestedQuantity: Math.max(0, Number(event.target.value) || 0) })}
+          className={inputClass()}
+        />
+      </label>
+      <HeaderField label="Tipo de item" value={details.productType} onChange={(value) => onChange({ ...details, productType: value })} />
+      <HeaderField label="Operadora" value={details.operator} onChange={(value) => onChange({ ...details, operator: value })} />
+      <HeaderField label="Equipamento / geração" value={details.equipmentModel} onChange={(value) => onChange({ ...details, equipmentModel: value })} />
+      <HeaderField label="Modelo / variação" value={details.modelVariation} onChange={(value) => onChange({ ...details, modelVariation: value })} />
+      <HeaderField label="Cor / acabamento" value={details.colorVariation} onChange={(value) => onChange({ ...details, colorVariation: value })} />
+      <HeaderField label="Tipo de negócio" value={details.businessType} onChange={(value) => onChange({ ...details, businessType: value })} />
+      <HeaderField label="Tipo de entrega" value={details.deliveryType} onChange={(value) => onChange({ ...details, deliveryType: value })} />
+      <HeaderField label="Data da solicitação" value={details.requestDate} onChange={(value) => onChange({ ...details, requestDate: value })} />
+      <HeaderField label="Previsão de entrega" value={details.expectedDeliveryDate} onChange={(value) => onChange({ ...details, expectedDeliveryDate: value })} />
+    </div>
   );
 }
 
@@ -176,6 +244,7 @@ function SeparationCard({
 
   const serialCount = draft.equipment.filter((line) => line.serialNumber.trim()).length;
   const chipCount = draft.equipment.filter((line) => line.ccid.trim()).length;
+  const orderDetails = draft.orderDetails || EMPTY_ORDER_DETAILS;
 
   return (
     <details className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -184,10 +253,15 @@ function SeparationCard({
           <strong className="text-sm text-slate-900">{record.orderNumber}</strong>
           <span className="ml-2 text-xs text-slate-500">{record.clientName || 'Cliente não informado'}</span>
           <p className="mt-1 text-[11px] text-slate-500">
-            {record.separationDate || 'Sem data'} · Separado por {record.separatedBy || 'não informado'}
+            {orderDetails.equipmentModel || 'Equipamento não informado'} · {record.separationDate || 'Sem data'} · Separado por {record.separatedBy || 'não informado'}
           </p>
         </div>
         <div className="flex gap-2 text-[11px] font-semibold">
+          {orderDetails.requestedQuantity > 0 && (
+            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-slate-700">
+              {serialCount}/{orderDetails.requestedQuantity} unidades
+            </span>
+          )}
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-800">{serialCount} serial(is)</span>
           <span className="rounded-full bg-violet-100 px-2.5 py-1 text-violet-800">{chipCount} chip(s)</span>
         </div>
@@ -201,6 +275,14 @@ function SeparationCard({
           <HeaderField label="Data de separação" type="date" value={draft.separationDate} onChange={(value) => setDraft((current) => ({ ...current, separationDate: value }))} />
         </div>
 
+        <section className="space-y-2 rounded-lg bg-slate-50 p-3">
+          <h3 className="text-xs font-bold text-slate-700">Informações do pedido · editáveis</h3>
+          <OrderDetailsFields
+            details={orderDetails}
+            onChange={(details) => setDraft((current) => ({ ...current, orderDetails: details }))}
+          />
+        </section>
+
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
           <div>
             <h3 className="text-sm font-bold text-slate-800">Equipamentos separados</h3>
@@ -208,7 +290,10 @@ function SeparationCard({
           </div>
           <button
             type="button"
-            onClick={() => setDraft((current) => ({ ...current, equipment: [...current.equipment, createEmptyEquipment()] }))}
+            onClick={() => setDraft((current) => ({
+              ...current,
+              equipment: [...current.equipment, createEmptyEquipment(current.orderDetails || EMPTY_ORDER_DETAILS)],
+            }))}
             className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100"
           >
             <Plus className="h-3.5 w-3.5" /> Adicionar equipamento
@@ -276,16 +361,76 @@ function SeparationCard({
 
 export function ProductionSeparationTab() {
   const [records, setRecords] = useState<SharedProductionSeparation[]>([]);
+  const [knownOrders, setKnownOrders] = useState<BaseOrder[]>(ORDERS_DATABASE);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [orderLoadError, setOrderLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingNew, setSavingNew] = useState(false);
   const [pageError, setPageError] = useState('');
   const [search, setSearch] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
+  const [prefilledOrderNumber, setPrefilledOrderNumber] = useState('');
   const [clientName, setClientName] = useState('');
+  const [orderDetails, setOrderDetails] = useState<SeparationOrderDetails>(EMPTY_ORDER_DETAILS);
   const [separatedBy, setSeparatedBy] = useState('');
   const [deliveryResponsible, setDeliveryResponsible] = useState('');
   const [separationDate, setSeparationDate] = useState(localDate);
+
+  useEffect(() => {
+    let active = true;
+    void loadOrdersFromGoogleSheet()
+      .then((sheetOrders) => {
+        if (!active) return;
+        const merged = new Map(
+          ORDERS_DATABASE.map((order) => [normalizeOrderNumber(order.numPedido), order])
+        );
+        sheetOrders.forEach((order) => merged.set(normalizeOrderNumber(order.numPedido), order));
+        setKnownOrders([...merged.values()]);
+      })
+      .catch((loadError) => {
+        console.error('Falha ao carregar pedidos para preenchimento da separação:', loadError);
+        if (active) setOrderLoadError('A lista online de pedidos não carregou. Pedidos locais continuam disponíveis.');
+      })
+      .finally(() => {
+        if (active) setOrdersLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const matchedOrder = useMemo(
+    () => knownOrders.find((order) => normalizeOrderNumber(order.numPedido) === normalizeOrderNumber(orderNumber)),
+    [knownOrders, orderNumber]
+  );
+  const isOrderPrefilled = Boolean(
+    matchedOrder && prefilledOrderNumber === normalizeOrderNumber(orderNumber)
+  );
+
+  useEffect(() => {
+    if (ordersLoading) return;
+    const normalized = normalizeOrderNumber(orderNumber);
+    if (!normalized) {
+      setPrefilledOrderNumber('');
+      setClientName('');
+      setOrderDetails(EMPTY_ORDER_DETAILS);
+      return;
+    }
+    if (matchedOrder) {
+      if (prefilledOrderNumber !== normalized) {
+        setPrefilledOrderNumber(normalized);
+        setClientName(matchedOrder.cliente);
+        setOrderDetails(getOrderDetails(matchedOrder));
+      }
+      return;
+    }
+    if (prefilledOrderNumber !== normalized) {
+      setPrefilledOrderNumber('');
+      setClientName('');
+      setOrderDetails(EMPTY_ORDER_DETAILS);
+    }
+  }, [matchedOrder, orderNumber, ordersLoading, prefilledOrderNumber]);
 
   const loadRecords = async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
@@ -348,7 +493,15 @@ export function ProductionSeparationTab() {
     const query = search.trim().toLocaleLowerCase('pt-BR');
     if (!query) return records;
     return records.filter((record) =>
-      [record.orderNumber, record.clientName, record.separatedBy, ...record.equipment.map((line) => line.serialNumber), ...record.equipment.map((line) => line.ccid)]
+      [
+        record.orderNumber,
+        record.clientName,
+        record.separatedBy,
+        record.orderDetails?.equipmentModel || '',
+        record.orderDetails?.modelVariation || '',
+        ...record.equipment.map((line) => line.serialNumber),
+        ...record.equipment.map((line) => line.ccid),
+      ]
         .some((value) => value.toLocaleLowerCase('pt-BR').includes(query))
     );
   }, [records, search]);
@@ -362,6 +515,7 @@ export function ProductionSeparationTab() {
       id: createId(),
       orderNumber: orderNumber.trim(),
       clientName: clientName.trim(),
+      orderDetails,
       separatedBy: separatedBy.trim(),
       deliveryResponsible: deliveryResponsible.trim(),
       separationDate,
@@ -371,7 +525,9 @@ export function ProductionSeparationTab() {
       const created = await createProductionSeparation(record);
       setRecords((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setOrderNumber('');
+      setPrefilledOrderNumber('');
       setClientName('');
+      setOrderDetails(EMPTY_ORDER_DETAILS);
       setSeparatedBy('');
       setDeliveryResponsible('');
       setSeparationDate(localDate());
@@ -427,17 +583,56 @@ export function ProductionSeparationTab() {
           <Plus className="h-4 w-4 text-blue-700" />
           <h2 className="text-sm font-bold text-slate-900">Iniciar nova separação</h2>
         </div>
-        <form onSubmit={(event) => void addRecord(event)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <HeaderField label="Nº do pedido" value={orderNumber} required onChange={setOrderNumber} />
-          <HeaderField label="Nome do cliente" value={clientName} onChange={setClientName} />
-          <HeaderField label="Quem separou" value={separatedBy} onChange={setSeparatedBy} />
-          <HeaderField label="Responsável pela entrega" value={deliveryResponsible} onChange={setDeliveryResponsible} />
-          <HeaderField label="Data de separação" type="date" value={separationDate} onChange={setSeparationDate} />
-          <div className="flex items-end">
-            <button type="submit" disabled={!sharedWmsClient || savingNew || !orderNumber.trim()} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
-              <Plus className="h-4 w-4" /> {savingNew ? 'Criando...' : 'Criar controle'}
-            </button>
+        <p className="mb-3 text-xs text-slate-500">
+          Informe apenas o número do pedido. Cliente, quantidade e especificações são buscados automaticamente; você pode revisá-los e editá-los.
+        </p>
+        <form onSubmit={(event) => void addRecord(event)} className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <label className="block text-xs font-medium text-slate-600">
+              Nº do pedido
+              <input
+                type="text"
+                list="production-order-options"
+                required
+                value={orderNumber}
+                onChange={(event) => setOrderNumber(event.target.value)}
+                placeholder="Digite ou selecione o número do pedido"
+                className={inputClass()}
+              />
+              <datalist id="production-order-options">
+                {knownOrders.map((order) => (
+                  <option key={`${order.id}-${order.numPedido}`} value={order.numPedido}>
+                    {order.cliente} · {order.quantidade} un.
+                  </option>
+                ))}
+              </datalist>
+            </label>
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={!sharedWmsClient || savingNew || ordersLoading || (Boolean(matchedOrder) && !isOrderPrefilled) || !orderNumber.trim()}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" /> {savingNew ? 'Criando...' : 'Criar controle'}
+              </button>
+            </div>
           </div>
+          {ordersLoading && <p className="text-[11px] text-slate-500">Carregando pedidos para preenchimento automático...</p>}
+          {orderLoadError && <p className="text-[11px] text-amber-700">{orderLoadError}</p>}
+          {!ordersLoading && orderNumber.trim() && isOrderPrefilled && (
+            <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+              <p className="text-xs font-semibold text-emerald-800">
+                Pedido encontrado. Confira ou edite os dados antes de criar.
+              </p>
+              <HeaderField label="Nome do cliente" value={clientName} onChange={setClientName} />
+              <OrderDetailsFields details={orderDetails} onChange={setOrderDetails} />
+            </div>
+          )}
+          {!ordersLoading && orderNumber.trim() && !matchedOrder && (
+            <p className="text-xs text-amber-700">
+              Pedido não localizado na lista. O controle será criado com o número informado; você poderá completar os dados depois.
+            </p>
+          )}
         </form>
       </section>
 

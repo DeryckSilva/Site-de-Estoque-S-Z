@@ -1,6 +1,7 @@
 import { sharedWmsClient } from './sharedWmsStore';
 import type {
   ProductionSeparationRecord,
+  SeparationOrderDetails,
   SeparatedEquipment,
   SharedProductionSeparation,
 } from '../types/productionSeparation';
@@ -17,14 +18,14 @@ function isSeparatedEquipment(value: unknown): value is SeparatedEquipment {
     typeof line.terminalColor === 'string' &&
     typeof line.terminalSize === 'string' &&
     typeof line.terminalDiameter === 'string' &&
-    typeof line.terminalQuantity === 'number' &&
+    typeof line.terminalQuantity === 'number' && Number.isFinite(line.terminalQuantity) && line.terminalQuantity >= 0 &&
     typeof line.batteryType === 'string' &&
     typeof line.kraftBoxType === 'string' &&
-    typeof line.kraftQuantity === 'number' &&
+    typeof line.kraftQuantity === 'number' && Number.isFinite(line.kraftQuantity) && line.kraftQuantity >= 0 &&
     typeof line.box3dType === 'string' &&
-    typeof line.box3dQuantity === 'number' &&
+    typeof line.box3dQuantity === 'number' && Number.isFinite(line.box3dQuantity) && line.box3dQuantity >= 0 &&
     typeof line.magnetType === 'string' &&
-    typeof line.magnetQuantity === 'number' &&
+    typeof line.magnetQuantity === 'number' && Number.isFinite(line.magnetQuantity) && line.magnetQuantity >= 0 &&
     typeof line.productionDeliveryDate === 'string' &&
     typeof line.productionResponsible === 'string';
 }
@@ -32,9 +33,26 @@ function isSeparatedEquipment(value: unknown): value is SeparatedEquipment {
 function isSeparationRecord(value: unknown): value is ProductionSeparationRecord {
   if (!value || typeof value !== 'object') return false;
   const record = value as Partial<ProductionSeparationRecord>;
+  const details = record.orderDetails as Partial<SeparationOrderDetails> | undefined;
   return typeof record.id === 'string' &&
     typeof record.orderNumber === 'string' &&
     typeof record.clientName === 'string' &&
+    (details === undefined || (
+      typeof details === 'object' &&
+      details !== null &&
+      typeof details.requestedQuantity === 'number' &&
+      Number.isFinite(details.requestedQuantity) &&
+      details.requestedQuantity >= 0 &&
+      typeof details.productType === 'string' &&
+      typeof details.operator === 'string' &&
+      typeof details.equipmentModel === 'string' &&
+      typeof details.modelVariation === 'string' &&
+      typeof details.colorVariation === 'string' &&
+      typeof details.businessType === 'string' &&
+      typeof details.deliveryType === 'string' &&
+      typeof details.requestDate === 'string' &&
+      typeof details.expectedDeliveryDate === 'string'
+    )) &&
     typeof record.separatedBy === 'string' &&
     typeof record.deliveryResponsible === 'string' &&
     typeof record.separationDate === 'string' &&
