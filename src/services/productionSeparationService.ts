@@ -8,6 +8,11 @@ import type {
 
 const TABLE = 'production_separations';
 
+function isQuantity(value: unknown): value is number | string {
+  return typeof value === 'string' ||
+    (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
 function isSeparatedEquipment(value: unknown): value is SeparatedEquipment {
   if (!value || typeof value !== 'object') return false;
   const line = value as Partial<SeparatedEquipment>;
@@ -18,14 +23,14 @@ function isSeparatedEquipment(value: unknown): value is SeparatedEquipment {
     typeof line.terminalColor === 'string' &&
     typeof line.terminalSize === 'string' &&
     typeof line.terminalDiameter === 'string' &&
-    typeof line.terminalQuantity === 'number' && Number.isFinite(line.terminalQuantity) && line.terminalQuantity >= 0 &&
+    isQuantity(line.terminalQuantity) &&
     typeof line.batteryType === 'string' &&
     typeof line.kraftBoxType === 'string' &&
-    typeof line.kraftQuantity === 'number' && Number.isFinite(line.kraftQuantity) && line.kraftQuantity >= 0 &&
+    isQuantity(line.kraftQuantity) &&
     typeof line.box3dType === 'string' &&
-    typeof line.box3dQuantity === 'number' && Number.isFinite(line.box3dQuantity) && line.box3dQuantity >= 0 &&
+    isQuantity(line.box3dQuantity) &&
     typeof line.magnetType === 'string' &&
-    typeof line.magnetQuantity === 'number' && Number.isFinite(line.magnetQuantity) && line.magnetQuantity >= 0 &&
+    isQuantity(line.magnetQuantity) &&
     typeof line.productionDeliveryDate === 'string' &&
     typeof line.productionResponsible === 'string';
 }

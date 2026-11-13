@@ -1,486 +1,198 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ClipboardCheck, Plus, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
-import { ORDERS_DATABASE } from '../../data/ordersDatabase';
-import { loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { AlertCircle, ClipboardList, LoaderCircle, Search, Save } from 'lucide-react';
 import { sharedWmsClient } from '../../services/sharedWmsStore';
 import {
   createProductionSeparation,
-  deleteProductionSeparation,
   listProductionSeparations,
   parseRealtimeProductionSeparation,
   saveProductionSeparation,
 } from '../../services/productionSeparationService';
 import type {
   ProductionSeparationRecord,
-  SeparationOrderDetails,
   SeparatedEquipment,
   SharedProductionSeparation,
 } from '../../types/productionSeparation';
-import type { BaseOrder } from '../../types/orders';
+import { loadOrderLedgerRows } from '../../services/googleSheetOrders';
+import {
+  generateProductionSeparationSequence,
+  type ProductionSeparationRow,
+  type ProductionSeparationSequence,
+} from '../../utils/productionSeparationGenerator';
 
-type TextEquipmentField = keyof Pick<
-  SeparatedEquipment,
-  | 'equipmentType'
-  | 'serialNumber'
-  | 'ccid'
-  | 'terminalColor'
-  | 'terminalSize'
-  | 'terminalDiameter'
-  | 'batteryType'
-  | 'kraftBoxType'
-  | 'box3dType'
-  | 'magnetType'
-  | 'productionDeliveryDate'
-  | 'productionResponsible'
->;
+const CURRENT_SEQUENCE_ID = '00000000-0000-4000-8000-000000000001';
 
-type NumberEquipmentField = keyof Pick<
-  SeparatedEquipment,
-  'terminalQuantity' | 'kraftQuantity' | 'box3dQuantity' | 'magnetQuantity'
->;
-
-const TEXT_EQUIPMENT_FIELDS: Array<{ key: TextEquipmentField; label: string; type?: 'text' | 'date' }> = [
+const COLUMNS: Array<{ key: keyof Omit<ProductionSeparationRow, 'id'>; label: string }> = [
+  { key: 'orderNumber', label: 'Nº do pedido' },
   { key: 'equipmentType', label: 'Tipo de equipamento' },
   { key: 'serialNumber', label: 'Serial' },
   { key: 'ccid', label: 'CCID / chip' },
-  { key: 'terminalColor', label: 'Cor do termo' },
-  { key: 'terminalSize', label: 'Tamanho do termo' },
+  { key: 'terminalColor', label: 'Cor termo' },
+  { key: 'terminalSize', label: 'Tam. termo' },
   { key: 'terminalDiameter', label: 'Diâmetro' },
-  { key: 'batteryType', label: 'Bateria' },
-  { key: 'kraftBoxType', label: 'Tipo de caixa Kraft' },
-  { key: 'box3dType', label: 'Tipo de caixa 3D' },
-  { key: 'magnetType', label: 'Tipo de ímã' },
-  { key: 'productionDeliveryDate', label: 'Data de entrega à Produção', type: 'date' },
-  { key: 'productionResponsible', label: 'Responsável pelo recebimento' },
+  { key: 'terminalQuantity', label: 'Qtd. termo' },
+  { key: 'battery', label: 'Bateria' },
+  { key: 'kraftBoxType', label: 'Tipo cx. Kraft' },
+  { key: 'kraftQuantity', label: 'Qtd. Kraft' },
+  { key: 'box3dType', label: 'Tipo cx. 3D' },
+  { key: 'box3dQuantity', label: 'Qtd. 3D' },
+  { key: 'magnetType', label: 'Tipo ímã' },
+  { key: 'magnetQuantity', label: 'Qtd. ímã' },
+  { key: 'deliveryDate', label: 'Data' },
+  { key: 'responsible', label: 'Responsável' },
 ];
 
-const NUMBER_EQUIPMENT_FIELDS: Array<{ key: NumberEquipmentField; label: string }> = [
-  { key: 'terminalQuantity', label: 'Qtd. de termos' },
-  { key: 'kraftQuantity', label: 'Qtd. caixas Kraft' },
-  { key: 'box3dQuantity', label: 'Qtd. caixas 3D' },
-  { key: 'magnetQuantity', label: 'Qtd. ímãs' },
-];
-
-const EMPTY_ORDER_DETAILS: SeparationOrderDetails = {
-  requestedQuantity: 0,
-  productType: '',
-  operator: '',
-  equipmentModel: '',
-  modelVariation: '',
-  colorVariation: '',
-  businessType: '',
-  deliveryType: '',
-  requestDate: '',
-  expectedDeliveryDate: '',
-};
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Não foi possível concluir a operação.';
+}
 
 function localDate(): string {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
-function createEmptyEquipment(details: SeparationOrderDetails = EMPTY_ORDER_DETAILS): SeparatedEquipment {
+function toRecord(sequence: ProductionSeparationSequence): ProductionSeparationRecord {
+  const equipment: SeparatedEquipment[] = sequence.rows.map((row) => ({
+    id: row.id,
+    equipmentType: row.equipmentType,
+    serialNumber: row.serialNumber,
+    ccid: row.ccid,
+    terminalColor: row.terminalColor,
+    terminalSize: row.terminalSize,
+    terminalDiameter: row.terminalDiameter,
+    terminalQuantity: row.terminalQuantity,
+    batteryType: row.battery,
+    kraftBoxType: row.kraftBoxType,
+    kraftQuantity: row.kraftQuantity,
+    box3dType: row.box3dType,
+    box3dQuantity: row.box3dQuantity,
+    magnetType: row.magnetType,
+    magnetQuantity: row.magnetQuantity,
+    productionDeliveryDate: row.deliveryDate,
+    productionResponsible: row.responsible,
+  }));
+
   return {
-    id: crypto.randomUUID(),
-    equipmentType: details.equipmentModel || '',
-    serialNumber: '',
-    ccid: '',
-    terminalColor: details.colorVariation || '',
-    terminalSize: '',
-    terminalDiameter: '',
-    terminalQuantity: 0,
-    batteryType: '',
-    kraftBoxType: '',
-    kraftQuantity: 0,
-    box3dType: '',
-    box3dQuantity: 0,
-    magnetType: '',
-    magnetQuantity: 0,
-    productionDeliveryDate: '',
-    productionResponsible: '',
+    id: CURRENT_SEQUENCE_ID,
+    orderNumber: sequence.orderNumber,
+    clientName: sequence.clientName,
+    orderDetails: {
+      requestedQuantity: sequence.rows.length,
+      productType: '',
+      operator: '',
+      equipmentModel: '',
+      modelVariation: '',
+      colorVariation: '',
+      businessType: '',
+      deliveryType: '',
+      requestDate: '',
+      expectedDeliveryDate: '',
+    },
+    separatedBy: '',
+    deliveryResponsible: '',
+    separationDate: localDate(),
+    equipment,
   };
 }
 
-function createId(): string {
-  return crypto.randomUUID();
-}
-
-function normalizeOrderNumber(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
-}
-
-function getOrderDetails(order: BaseOrder): SeparationOrderDetails {
+function fromRecord(record: ProductionSeparationRecord): ProductionSeparationSequence {
   return {
-    requestedQuantity: order.quantidade || 0,
-    productType: order.tipoItem || '',
-    operator: order.operadora || '',
-    equipmentModel: order.geracao || order.mappedItemName || '',
-    modelVariation: order.modeloVariacao || '',
-    colorVariation: order.corVariacao || '',
-    businessType: order.tipoNegocio || '',
-    deliveryType: order.tipoEntrega || '',
-    requestDate: order.dataSolicitacao || '',
-    expectedDeliveryDate: order.dataEnvio || '',
+    orderNumber: record.orderNumber,
+    clientName: record.clientName,
+    rows: record.equipment.map((item) => ({
+      id: item.id,
+      orderNumber: record.orderNumber,
+      equipmentType: item.equipmentType,
+      serialNumber: item.serialNumber,
+      ccid: item.ccid,
+      terminalColor: item.terminalColor,
+      terminalSize: item.terminalSize,
+      terminalDiameter: item.terminalDiameter,
+      terminalQuantity: String(item.terminalQuantity),
+      battery: item.batteryType,
+      kraftBoxType: item.kraftBoxType,
+      kraftQuantity: String(item.kraftQuantity),
+      box3dType: item.box3dType,
+      box3dQuantity: String(item.box3dQuantity),
+      magnetType: item.magnetType,
+      magnetQuantity: String(item.magnetQuantity),
+      deliveryDate: item.productionDeliveryDate,
+      responsible: item.productionResponsible,
+    })),
   };
-}
-
-function inputClass(): string {
-  return 'mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
-}
-
-function HeaderField({
-  label,
-  value,
-  onChange,
-  type = 'text',
-  required = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: 'text' | 'date';
-  required?: boolean;
-}) {
-  return (
-    <label className="block text-xs font-medium text-slate-600">
-      {label}
-      <input
-        type={type}
-        required={required}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={inputClass()}
-      />
-    </label>
-  );
-}
-
-function OrderDetailsFields({
-  details,
-  onChange,
-}: {
-  details: SeparationOrderDetails;
-  onChange: (details: SeparationOrderDetails) => void;
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <label className="block text-xs font-medium text-slate-600">
-        Quantidade solicitada
-        <input
-          type="number"
-          min="0"
-          value={details.requestedQuantity}
-          onChange={(event) => onChange({ ...details, requestedQuantity: Math.max(0, Number(event.target.value) || 0) })}
-          className={inputClass()}
-        />
-      </label>
-      <HeaderField label="Tipo de item" value={details.productType} onChange={(value) => onChange({ ...details, productType: value })} />
-      <HeaderField label="Operadora" value={details.operator} onChange={(value) => onChange({ ...details, operator: value })} />
-      <HeaderField label="Equipamento / geração" value={details.equipmentModel} onChange={(value) => onChange({ ...details, equipmentModel: value })} />
-      <HeaderField label="Modelo / variação" value={details.modelVariation} onChange={(value) => onChange({ ...details, modelVariation: value })} />
-      <HeaderField label="Cor / acabamento" value={details.colorVariation} onChange={(value) => onChange({ ...details, colorVariation: value })} />
-      <HeaderField label="Tipo de negócio" value={details.businessType} onChange={(value) => onChange({ ...details, businessType: value })} />
-      <HeaderField label="Tipo de entrega" value={details.deliveryType} onChange={(value) => onChange({ ...details, deliveryType: value })} />
-      <HeaderField label="Data da solicitação" value={details.requestDate} onChange={(value) => onChange({ ...details, requestDate: value })} />
-      <HeaderField label="Previsão de entrega" value={details.expectedDeliveryDate} onChange={(value) => onChange({ ...details, expectedDeliveryDate: value })} />
-    </div>
-  );
-}
-
-function SeparationCard({
-  record,
-  onSave,
-  onDelete,
-}: {
-  record: SharedProductionSeparation;
-  onSave: (record: SharedProductionSeparation) => Promise<void>;
-  onDelete: (record: SharedProductionSeparation) => Promise<void>;
-}) {
-  const [draft, setDraft] = useState<SharedProductionSeparation>(record);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    setDraft(record);
-  }, [record]);
-
-  const updateTextField = (key: TextEquipmentField, lineId: string, value: string) => {
-    setDraft((current) => ({
-      ...current,
-      equipment: current.equipment.map((line) => line.id === lineId ? { ...line, [key]: value } : line),
-    }));
-  };
-
-  const updateNumberField = (key: NumberEquipmentField, lineId: string, value: number) => {
-    setDraft((current) => ({
-      ...current,
-      equipment: current.equipment.map((line) => line.id === lineId ? { ...line, [key]: value } : line),
-    }));
-  };
-
-  const save = async () => {
-    setSaving(true);
-    setError('');
-    try {
-      await onSave(draft);
-    } catch (saveError) {
-      console.error('Falha ao salvar a separação:', saveError);
-      setError(saveError instanceof Error ? saveError.message : 'Não foi possível salvar as alterações.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!window.confirm(`Excluir o controle de separação do pedido ${record.orderNumber}?`)) return;
-    setError('');
-    try {
-      await onDelete(record);
-    } catch (deleteError) {
-      console.error('Falha ao excluir a separação:', deleteError);
-      setError(deleteError instanceof Error ? deleteError.message : 'Não foi possível excluir este controle.');
-    }
-  };
-
-  const serialCount = draft.equipment.filter((line) => line.serialNumber.trim()).length;
-  const chipCount = draft.equipment.filter((line) => line.ccid.trim()).length;
-  const orderDetails = draft.orderDetails || EMPTY_ORDER_DETAILS;
-
-  return (
-    <details className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-3">
-        <div>
-          <strong className="text-sm text-slate-900">{record.orderNumber}</strong>
-          <span className="ml-2 text-xs text-slate-500">{record.clientName || 'Cliente não informado'}</span>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {orderDetails.equipmentModel || 'Equipamento não informado'} · {record.separationDate || 'Sem data'} · Separado por {record.separatedBy || 'não informado'}
-          </p>
-        </div>
-        <div className="flex gap-2 text-[11px] font-semibold">
-          {orderDetails.requestedQuantity > 0 && (
-            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-slate-700">
-              {serialCount}/{orderDetails.requestedQuantity} unidades
-            </span>
-          )}
-          <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-800">{serialCount} serial(is)</span>
-          <span className="rounded-full bg-violet-100 px-2.5 py-1 text-violet-800">{chipCount} chip(s)</span>
-        </div>
-      </summary>
-      <div className="space-y-4 p-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <HeaderField label="Nº do pedido" value={draft.orderNumber} required onChange={(value) => setDraft((current) => ({ ...current, orderNumber: value }))} />
-          <HeaderField label="Nome do cliente" value={draft.clientName} onChange={(value) => setDraft((current) => ({ ...current, clientName: value }))} />
-          <HeaderField label="Quem separou" value={draft.separatedBy} onChange={(value) => setDraft((current) => ({ ...current, separatedBy: value }))} />
-          <HeaderField label="Responsável pela entrega" value={draft.deliveryResponsible} onChange={(value) => setDraft((current) => ({ ...current, deliveryResponsible: value }))} />
-          <HeaderField label="Data de separação" type="date" value={draft.separationDate} onChange={(value) => setDraft((current) => ({ ...current, separationDate: value }))} />
-        </div>
-
-        <section className="space-y-2 rounded-lg bg-slate-50 p-3">
-          <h3 className="text-xs font-bold text-slate-700">Informações do pedido · editáveis</h3>
-          <OrderDetailsFields
-            details={orderDetails}
-            onChange={(details) => setDraft((current) => ({ ...current, orderDetails: details }))}
-          />
-        </section>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
-          <div>
-            <h3 className="text-sm font-bold text-slate-800">Equipamentos separados</h3>
-            <p className="text-[11px] text-slate-500">Registre serial, CCID/chip e os acessórios de cada unidade.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDraft((current) => ({
-              ...current,
-              equipment: [...current.equipment, createEmptyEquipment(current.orderDetails || EMPTY_ORDER_DETAILS)],
-            }))}
-            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100"
-          >
-            <Plus className="h-3.5 w-3.5" /> Adicionar equipamento
-          </button>
-        </div>
-
-        {draft.equipment.length === 0 && (
-          <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
-            Ainda não há equipamentos neste pedido.
-          </p>
-        )}
-
-        {draft.equipment.map((line, index) => (
-          <fieldset key={line.id} className="rounded-lg border border-slate-200 p-3">
-            <legend className="px-1 text-xs font-bold text-slate-700">Equipamento {index + 1}</legend>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {TEXT_EQUIPMENT_FIELDS.map((field) => (
-                <label key={field.key} className="block text-[11px] font-medium text-slate-600">
-                  {field.label}
-                  <input
-                    type={field.type || 'text'}
-                    value={line[field.key]}
-                    onChange={(event) => updateTextField(field.key, line.id, event.target.value)}
-                    className={inputClass()}
-                  />
-                </label>
-              ))}
-              {NUMBER_EQUIPMENT_FIELDS.map((field) => (
-                <label key={field.key} className="block text-[11px] font-medium text-slate-600">
-                  {field.label}
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={line[field.key]}
-                    onChange={(event) => updateNumberField(field.key, line.id, Math.max(0, Number(event.target.value) || 0))}
-                    className={inputClass()}
-                  />
-                </label>
-              ))}
-              <button
-                type="button"
-                onClick={() => setDraft((current) => ({ ...current, equipment: current.equipment.filter((item) => item.id !== line.id) }))}
-                className="mt-auto inline-flex items-center justify-center gap-1 rounded-md border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Remover equipamento
-              </button>
-            </div>
-          </fieldset>
-        ))}
-
-        {error && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-        <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={() => void remove()} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
-            <Trash2 className="h-3.5 w-3.5" /> Excluir pedido
-          </button>
-          <button type="button" onClick={() => void save()} disabled={saving || !draft.orderNumber.trim()} className="inline-flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
-            <Save className="h-3.5 w-3.5" /> {saving ? 'Salvando...' : 'Salvar separação'}
-          </button>
-        </div>
-      </div>
-    </details>
-  );
 }
 
 export function ProductionSeparationTab() {
-  const [records, setRecords] = useState<SharedProductionSeparation[]>([]);
-  const [knownOrders, setKnownOrders] = useState<BaseOrder[]>(ORDERS_DATABASE);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [orderLoadError, setOrderLoadError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [savingNew, setSavingNew] = useState(false);
-  const [pageError, setPageError] = useState('');
-  const [search, setSearch] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
-  const [prefilledOrderNumber, setPrefilledOrderNumber] = useState('');
-  const [clientName, setClientName] = useState('');
-  const [orderDetails, setOrderDetails] = useState<SeparationOrderDetails>(EMPTY_ORDER_DETAILS);
-  const [separatedBy, setSeparatedBy] = useState('');
-  const [deliveryResponsible, setDeliveryResponsible] = useState('');
-  const [separationDate, setSeparationDate] = useState(localDate);
+  const [sequence, setSequence] = useState<ProductionSeparationSequence | null>(null);
+  const [sharedRecord, setSharedRecord] = useState<SharedProductionSeparation | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingCurrentSequence, setLoadingCurrentSequence] = useState(Boolean(sharedWmsClient));
+  const [isDirty, setIsDirty] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [notice, setNotice] = useState('');
+  const isDirtyRef = useRef(false);
+  const isSavingRef = useRef(false);
 
-  useEffect(() => {
-    let active = true;
-    void loadOrdersFromGoogleSheet()
-      .then((sheetOrders) => {
-        if (!active) return;
-        const merged = new Map(
-          ORDERS_DATABASE.map((order) => [normalizeOrderNumber(order.numPedido), order])
-        );
-        sheetOrders.forEach((order) => merged.set(normalizeOrderNumber(order.numPedido), order));
-        setKnownOrders([...merged.values()]);
-      })
-      .catch((loadError) => {
-        console.error('Falha ao carregar pedidos para preenchimento da separação:', loadError);
-        if (active) setOrderLoadError('A lista online de pedidos não carregou. Pedidos locais continuam disponíveis.');
-      })
-      .finally(() => {
-        if (active) setOrdersLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const matchedOrder = useMemo(
-    () => knownOrders.find((order) => normalizeOrderNumber(order.numPedido) === normalizeOrderNumber(orderNumber)),
-    [knownOrders, orderNumber]
-  );
-  const isOrderPrefilled = Boolean(
-    matchedOrder && prefilledOrderNumber === normalizeOrderNumber(orderNumber)
-  );
-
-  useEffect(() => {
-    if (ordersLoading) return;
-    const normalized = normalizeOrderNumber(orderNumber);
-    if (!normalized) {
-      setPrefilledOrderNumber('');
-      setClientName('');
-      setOrderDetails(EMPTY_ORDER_DETAILS);
-      return;
-    }
-    if (matchedOrder) {
-      if (prefilledOrderNumber !== normalized) {
-        setPrefilledOrderNumber(normalized);
-        setClientName(matchedOrder.cliente);
-        setOrderDetails(getOrderDetails(matchedOrder));
-      }
-      return;
-    }
-    if (prefilledOrderNumber !== normalized) {
-      setPrefilledOrderNumber('');
-      setClientName('');
-      setOrderDetails(EMPTY_ORDER_DETAILS);
-    }
-  }, [matchedOrder, orderNumber, ordersLoading, prefilledOrderNumber]);
-
-  const loadRecords = async (showRefreshing = false) => {
-    if (showRefreshing) setRefreshing(true);
-    setPageError('');
-    try {
-      const loaded = await listProductionSeparations();
-      setRecords(loaded);
-    } catch (loadError) {
-      console.error('Falha ao carregar o controle de separação:', loadError);
-      setPageError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar as separações.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  function markDirty(value: boolean) {
+    isDirtyRef.current = value;
+    setIsDirty(value);
+  }
 
   useEffect(() => {
     const client = sharedWmsClient;
     if (!client) {
-      setPageError('O Supabase compartilhado não está configurado neste site.');
-      setLoading(false);
+      setNotice('A sequência pode ser gerada e editada, mas o compartilhamento não está configurado neste site.');
       return;
     }
+
     let active = true;
-    void loadRecords();
     const channel = client
-      .channel('production-separations')
+      .channel('production-separation-current')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'production_separations' }, (payload) => {
-        if (!active) return;
         if (payload.eventType === 'DELETE') {
-          const id = (payload.old as { id?: unknown }).id;
-          if (typeof id === 'string') setRecords((current) => current.filter((record) => record.id !== id));
+          const deletedId = (payload.old as { id?: unknown }).id;
+          if (deletedId === CURRENT_SEQUENCE_ID && active) {
+            setSharedRecord(null);
+            if (!isDirtyRef.current) setSequence(null);
+          }
           return;
         }
+
         try {
-          const record = parseRealtimeProductionSeparation(payload.new);
-          setRecords((current) => [
-            record,
-            ...current.filter((existing) => existing.id !== record.id),
-          ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
-        } catch (parseError) {
-          console.error('O Supabase enviou um registro de separação inválido:', parseError);
-          setPageError('O Supabase enviou um registro de separação inválido. Atualize a tela.');
+          const incoming = parseRealtimeProductionSeparation(payload.new);
+          if (incoming.id !== CURRENT_SEQUENCE_ID || !active) return;
+          if (isDirtyRef.current && !isSavingRef.current) {
+            setErrorMessage('A sequência foi alterada por outro usuário. Atualize antes de salvar suas alterações.');
+            return;
+          }
+          if (isSavingRef.current) return;
+          setSharedRecord(incoming);
+          setSequence(fromRecord(incoming));
+          setNotice('Sequência atualizada por outro usuário.');
+        } catch (error) {
+          console.error('O Supabase enviou uma sequência de separação inválida:', error);
+          if (active) setErrorMessage('O Supabase enviou uma sequência inválida. Atualize a página.');
         }
       })
-      .subscribe((status) => {
+      .subscribe();
+
+    listProductionSeparations()
+      .then((records) => {
         if (!active) return;
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setPageError('A sincronização em tempo real falhou. Atualize a tela para conferir os dados mais recentes.');
+        const current = records.find((record) => record.id === CURRENT_SEQUENCE_ID) || null;
+        setSharedRecord(current);
+        if (current) {
+          setSequence(fromRecord(current));
+          setOrderNumber(current.orderNumber);
         }
+      })
+      .catch((error) => {
+        console.error('Falha ao carregar a sequência compartilhada:', error);
+        if (active) setErrorMessage(`Não foi possível carregar a sequência compartilhada. ${getErrorMessage(error)}`);
+      })
+      .finally(() => {
+        if (active) setLoadingCurrentSequence(false);
       });
 
     return () => {
@@ -489,177 +201,198 @@ export function ProductionSeparationTab() {
     };
   }, []);
 
-  const visibleRecords = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase('pt-BR');
-    if (!query) return records;
-    return records.filter((record) =>
-      [
-        record.orderNumber,
-        record.clientName,
-        record.separatedBy,
-        record.orderDetails?.equipmentModel || '',
-        record.orderDetails?.modelVariation || '',
-        ...record.equipment.map((line) => line.serialNumber),
-        ...record.equipment.map((line) => line.ccid),
-      ]
-        .some((value) => value.toLocaleLowerCase('pt-BR').includes(query))
-    );
-  }, [records, search]);
-
-  const addRecord = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!orderNumber.trim()) return;
-    setSavingNew(true);
-    setPageError('');
-    const record: ProductionSeparationRecord = {
-      id: createId(),
-      orderNumber: orderNumber.trim(),
-      clientName: clientName.trim(),
-      orderDetails,
-      separatedBy: separatedBy.trim(),
-      deliveryResponsible: deliveryResponsible.trim(),
-      separationDate,
-      equipment: [],
-    };
-    try {
-      const created = await createProductionSeparation(record);
-      setRecords((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-      setOrderNumber('');
-      setPrefilledOrderNumber('');
-      setClientName('');
-      setOrderDetails(EMPTY_ORDER_DETAILS);
-      setSeparatedBy('');
-      setDeliveryResponsible('');
-      setSeparationDate(localDate());
-    } catch (createError) {
-      console.error('Falha ao criar o controle de separação:', createError);
-      setPageError(createError instanceof Error ? createError.message : 'Não foi possível criar o controle.');
-    } finally {
-      setSavingNew(false);
+  async function persistSequence(candidate: ProductionSeparationSequence) {
+    if (!sharedWmsClient) {
+      setNotice('Alterações disponíveis apenas nesta tela: o compartilhamento não está configurado.');
+      markDirty(true);
+      return;
     }
-  };
 
-  const saveRecord = async (record: SharedProductionSeparation) => {
-    const saved = await saveProductionSeparation(record);
-    setRecords((current) => current.map((item) => item.id === saved.id ? saved : item));
-  };
+    setSaving(true);
+    isSavingRef.current = true;
+    setErrorMessage('');
+    try {
+      const record = toRecord(candidate);
+      const saved = sharedRecord?.id === CURRENT_SEQUENCE_ID
+        ? await saveProductionSeparation({
+            ...record,
+            revision: sharedRecord.revision,
+            updatedAt: sharedRecord.updatedAt,
+          })
+        : await createProductionSeparation(record);
+      setSharedRecord(saved);
+      setSequence(fromRecord(saved));
+      markDirty(false);
+      setNotice('Sequência salva e compartilhada com a equipe.');
+    } catch (error) {
+      console.error('Falha ao salvar a sequência compartilhada:', error);
+      setErrorMessage(`A sequência está visível nesta tela, mas não foi salva no compartilhamento. ${getErrorMessage(error)}`);
+    } finally {
+      isSavingRef.current = false;
+      setSaving(false);
+    }
+  }
 
-  const removeRecord = async (record: SharedProductionSeparation) => {
-    await deleteProductionSeparation(record);
-    setRecords((current) => current.filter((item) => item.id !== record.id));
-  };
+  async function handleGenerate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setGenerating(true);
+    setErrorMessage('');
+    setNotice('');
 
-  const totalEquipment = records.reduce((sum, record) => sum + record.equipment.length, 0);
+    try {
+      const ledgerRows = await loadOrderLedgerRows();
+      const generated = generateProductionSeparationSequence(ledgerRows, orderNumber);
+      setSequence(generated);
+      markDirty(true);
+      if (sharedWmsClient) await persistSequence(generated);
+      else setNotice('Sequência gerada nesta tela. Configure o compartilhamento para que a equipe também possa acessá-la.');
+    } catch (error) {
+      console.error('Falha ao gerar a sequência de separação:', error);
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function updateRow(rowId: string, key: keyof Omit<ProductionSeparationRow, 'id'>, value: string) {
+    setSequence((current) => {
+      if (!current) return current;
+      if (key === 'orderNumber') {
+        return {
+          ...current,
+          orderNumber: value,
+          rows: current.rows.map((row) => ({ ...row, orderNumber: value })),
+        };
+      }
+      return {
+        ...current,
+        rows: current.rows.map((row) => (row.id === rowId ? { ...row, [key]: value } : row)),
+      };
+    });
+    markDirty(true);
+  }
+
+  function updateClientName(value: string) {
+    setSequence((current) => current ? { ...current, clientName: value } : current);
+    markDirty(true);
+  }
 
   return (
-    <div className="space-y-4">
-      <header className="flex items-center gap-3 border-b border-slate-200 pb-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-700">
-          <ClipboardCheck className="h-5 w-5" />
+    <div className="space-y-5">
+      <header className="flex items-start gap-3">
+        <div className="rounded-lg bg-blue-50 p-2 text-blue-700">
+          <ClipboardList className="h-5 w-5" />
         </div>
         <div>
           <h1 className="text-xl font-bold text-slate-900">Separação de pedidos</h1>
-          <p className="text-xs text-slate-500">Controle por pedido, equipamento, serial, chip e acessórios.</p>
+          <p className="mt-1 text-sm text-slate-600">
+            Informe o número do pedido para gerar a sequência a partir de Lançamentos.
+          </p>
         </div>
-        <button type="button" onClick={() => void loadRecords(true)} disabled={refreshing} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Atualizar
-        </button>
       </header>
 
-      <div role="alert" className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <p><strong>Acesso público:</strong> este controle é compartilhado sem login. Qualquer pessoa com acesso ao site poderá consultar, criar, alterar e excluir os registros. Não informe dados que não possam ser públicos.</p>
-      </div>
+      <form onSubmit={handleGenerate} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-end">
+        <label className="block flex-1 text-sm font-medium text-slate-700">
+          Nº do pedido
+          <input
+            type="text"
+            required
+            value={orderNumber}
+            onChange={(event) => setOrderNumber(event.target.value)}
+            placeholder="Digite o número do pedido"
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={generating || loadingCurrentSequence}
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {generating || loadingCurrentSequence ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          {loadingCurrentSequence ? 'Carregando...' : generating ? 'Gerando...' : 'Gerar sequência'}
+        </button>
+      </form>
 
-      {pageError && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {pageError}
-          {!sharedWmsClient && <span> Configure as variáveis Supabase conforme o README e execute o script SQL de separação.</span>}
+      {errorMessage && (
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{errorMessage}</span>
         </div>
       )}
+      {notice && <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">{notice}</p>}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2">
-          <Plus className="h-4 w-4 text-blue-700" />
-          <h2 className="text-sm font-bold text-slate-900">Iniciar nova separação</h2>
-        </div>
-        <p className="mb-3 text-xs text-slate-500">
-          Informe apenas o número do pedido. Cliente, quantidade e especificações são buscados automaticamente; você pode revisá-los e editá-los.
-        </p>
-        <form onSubmit={(event) => void addRecord(event)} className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <label className="block text-xs font-medium text-slate-600">
-              Nº do pedido
-              <input
-                type="text"
-                list="production-order-options"
-                required
-                value={orderNumber}
-                onChange={(event) => setOrderNumber(event.target.value)}
-                placeholder="Digite ou selecione o número do pedido"
-                className={inputClass()}
-              />
-              <datalist id="production-order-options">
-                {knownOrders.map((order) => (
-                  <option key={`${order.id}-${order.numPedido}`} value={order.numPedido}>
-                    {order.cliente} · {order.quantidade} un.
-                  </option>
+      {sequence ? (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+            <div>
+              <h2 className="font-semibold text-slate-900">Pedido {sequence.orderNumber}</h2>
+              <label className="mt-1 flex items-center gap-1 text-sm text-slate-600">
+                Cliente:
+                <input
+                  type="text"
+                  value={sequence.clientName}
+                  onChange={(event) => updateClientName(event.target.value)}
+                  className="min-w-40 rounded border border-transparent bg-transparent px-1 py-0.5 outline-none focus:border-blue-400 focus:bg-white"
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-800">
+                {sequence.rows.length} {sequence.rows.length === 1 ? 'unidade' : 'unidades'}
+              </span>
+              {isDirty && sharedWmsClient && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void persistSequence(sequence)}
+                  className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+                >
+                  {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {saving ? 'Salvando...' : 'Salvar alterações'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-[2200px] border-collapse text-left text-xs">
+              <thead className="sticky top-0 bg-slate-100 text-slate-700">
+                <tr>
+                  {COLUMNS.map((column) => (
+                    <th key={column.key} className="border-b border-slate-200 px-2 py-2 font-semibold">
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sequence.rows.map((row, rowIndex) => (
+                  <tr key={row.id} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                    {COLUMNS.map((column) => (
+                      <td key={column.key} className="border-b border-slate-100 px-1.5 py-1">
+                        <input
+                          type="text"
+                          aria-label={`${column.label}, linha ${rowIndex + 1}`}
+                          value={row[column.key]}
+                          onChange={(event) => updateRow(row.id, column.key, event.target.value)}
+                          className="w-full min-w-24 rounded border border-transparent bg-transparent px-1.5 py-1 text-xs text-slate-800 outline-none focus:border-blue-400 focus:bg-white focus:ring-1 focus:ring-blue-100"
+                        />
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </datalist>
-            </label>
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={!sharedWmsClient || savingNew || ordersLoading || (Boolean(matchedOrder) && !isOrderPrefilled) || !orderNumber.trim()}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus className="h-4 w-4" /> {savingNew ? 'Criando...' : 'Criar controle'}
-              </button>
-            </div>
+              </tbody>
+            </table>
           </div>
-          {ordersLoading && <p className="text-[11px] text-slate-500">Carregando pedidos para preenchimento automático...</p>}
-          {orderLoadError && <p className="text-[11px] text-amber-700">{orderLoadError}</p>}
-          {!ordersLoading && orderNumber.trim() && isOrderPrefilled && (
-            <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-              <p className="text-xs font-semibold text-emerald-800">
-                Pedido encontrado. Confira ou edite os dados antes de criar.
-              </p>
-              <HeaderField label="Nome do cliente" value={clientName} onChange={setClientName} />
-              <OrderDetailsFields details={orderDetails} onChange={setOrderDetails} />
-            </div>
-          )}
-          {!ordersLoading && orderNumber.trim() && !matchedOrder && (
-            <p className="text-xs text-amber-700">
-              Pedido não localizado na lista. O controle será criado com o número informado; você poderá completar os dados depois.
-            </p>
-          )}
-        </form>
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-bold text-slate-900">Pedidos em separação</h2>
-            <p className="text-[11px] text-slate-500">{records.length} pedido(s) · {totalEquipment} equipamento(s) registrados</p>
-          </div>
-          <label className="relative block w-full sm:w-72">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar pedido, cliente, serial ou CCID" className="w-full rounded-md border border-slate-300 py-2 pl-8 pr-3 text-xs outline-none focus:border-blue-500" />
-          </label>
-        </div>
-
-        {loading ? (
-          <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">Carregando separações...</p>
-        ) : visibleRecords.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
-            {records.length ? 'Nenhum pedido corresponde à busca.' : 'Nenhum controle de separação cadastrado.'}
+          <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
+            Os campos podem ser editados diretamente. Serial, CCID e responsável começam em branco, como no script. Gerar outro pedido substitui a sequência atual.
           </p>
-        ) : (
-          visibleRecords.map((record) => (
-            <SeparationCard key={record.id} record={record} onSave={saveRecord} onDelete={removeRecord} />
-          ))
-        )}
-      </section>
+        </section>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+          {loadingCurrentSequence ? 'Carregando a sequência compartilhada...' : 'A sequência do pedido aparecerá aqui após a geração.'}
+        </div>
+      )}
     </div>
   );
 }

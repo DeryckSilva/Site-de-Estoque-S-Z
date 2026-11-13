@@ -6,14 +6,14 @@ export interface SeparatedEquipment {
   terminalColor: string;
   terminalSize: string;
   terminalDiameter: string;
-  terminalQuantity: number;
+  terminalQuantity: number | string;
   batteryType: string;
   kraftBoxType: string;
-  kraftQuantity: number;
+  kraftQuantity: number | string;
   box3dType: string;
-  box3dQuantity: number;
+  box3dQuantity: number | string;
   magnetType: string;
-  magnetQuantity: number;
+  magnetQuantity: number | string;
   productionDeliveryDate: string;
   productionResponsible: string;
 }

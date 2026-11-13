@@ -124,6 +124,12 @@ export async function loadOrdersFromGoogleSheet(): Promise<BaseOrder[]> {
   return parseOrdersSheetCsv(await response.text());
 }
 
+export async function loadOrderLedgerRows(): Promise<string[][]> {
+  const response = await fetch(ORDERS_SHEET_URL, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Planilha de lançamentos indisponível (${response.status})`);
+  return splitCsvRecords(await response.text());
+}
+
 export async function loadAttendedOrderNumbers(): Promise<Set<string>> {
   const response = await fetch(ATTENDED_ORDERS_SHEET_URL, { cache: 'no-store' });
   if (!response.ok) throw new Error(`Planilha de pedidos atendidos indisponível (${response.status})`);
