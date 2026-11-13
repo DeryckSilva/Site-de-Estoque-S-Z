@@ -12,7 +12,10 @@ import { STORAGE_KEYS } from '../../services/productionSyncService';
 import { loadAttendedOrderNumbers, loadOrdersFromGoogleSheet } from '../../services/googleSheetOrders';
 import { EQUIPMENT_ITEMS } from '../../data/initialData';
 import { sharedPickupClient } from '../../services/pickupSignatureStore';
-import { printPickupLabelWithZebra } from '../../services/zebraBrowserPrint';
+import {
+  printPickupLabelWithNetworkZebra,
+  printPickupLabelWithZebra,
+} from '../../services/zebraBrowserPrint';
 
 const TEST_RECORD_OPTION = '__pickup_test__';
 const AD_HOC_RECORD_OPTION = '__pickup_ad_hoc__';
@@ -242,7 +245,7 @@ export function PickupSignatureTab() {
     setPrintSuccess('');
   }, [selectedRequestId]);
 
-  const handlePrintLabel = async () => {
+  const handlePrintLabel = async (connection: 'usb' | 'wifi') => {
     if (!selectedRequest || !signaturePageUrl) return;
 
     setIsPrintingLabel(true);
@@ -255,13 +258,16 @@ export function PickupSignatureTab() {
       if (!qrCodeSvg) {
         throw new Error('O QR Code ainda não está pronto para impressão. Tente novamente.');
       }
-      const printerName = await printPickupLabelWithZebra({
+      const labelData = {
         orderNumber: selectedRequest.salesOrder,
         customer: selectedRequest.customer,
         separationDate: formatLabelDate(selectedRequest.separationDate),
         equipmentQuantity: String(selectedRequest.equipmentQuantity),
         chipQuantity: String(selectedRequest.chipQuantity),
-      }, qrCodeSvg);
+      };
+      const printerName = connection === 'wifi'
+        ? await printPickupLabelWithNetworkZebra(labelData, qrCodeSvg)
+        : await printPickupLabelWithZebra(labelData, qrCodeSvg);
       setPrintSuccess(`Etiqueta enviada para ${printerName}.`);
     } catch (printFailure) {
       console.error('Falha ao imprimir etiqueta na Zebra:', printFailure);
@@ -523,11 +529,18 @@ export function PickupSignatureTab() {
                   </div>
                 </div>
               </div>
-              <button type="button" onClick={() => void handlePrintLabel()} disabled={isPrintingLabel}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60">
-                <Printer className="h-4 w-4" />
-                {isPrintingLabel ? 'Enviando para Zebra...' : 'Imprimir etiqueta Zebra'}
-              </button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button type="button" onClick={() => void handlePrintLabel('usb')} disabled={isPrintingLabel}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60">
+                  <Printer className="h-4 w-4" />
+                  {isPrintingLabel ? 'Enviando para Zebra...' : 'Imprimir etiqueta Zebra (USB)'}
+                </button>
+                <button type="button" onClick={() => void handlePrintLabel('wifi')} disabled={isPrintingLabel}
+                  className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60">
+                  <Printer className="h-4 w-4" />
+                  {isPrintingLabel ? 'Enviando para Zebra...' : 'Imprimir etiqueta Zebra (Wi-Fi · ZEBRA-ZD)'}
+                </button>
+              </div>
               {printError && (
                 <p role="alert" className="max-w-sm text-center text-xs text-red-700">{printError}</p>
               )}

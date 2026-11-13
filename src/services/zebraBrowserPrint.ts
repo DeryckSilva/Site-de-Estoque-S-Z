@@ -21,6 +21,11 @@ interface ZebraBrowserPrintApi {
     onSuccess: (device: ZebraPrinterDevice | null) => void,
     onError: (error: unknown) => void
   ) => void;
+  getLocalDevices: (
+    onSuccess: (devices: ZebraPrinterDevice[]) => void,
+    onError: (error: unknown) => void,
+    deviceType?: string
+  ) => void;
 }
 
 declare global {
@@ -296,12 +301,38 @@ function getDefaultZebraPrinter(
   });
 }
 
-export async function printPickupLabelWithZebra(
+function getNetworkZebraPrinter(
+  browserPrint: ZebraBrowserPrintApi,
+  printerName: string
+): Promise<ZebraPrinterDevice> {
+  return new Promise((resolve, reject) => {
+    browserPrint.getLocalDevices(
+      (devices) => {
+        const printer = devices.find(
+          (device) => device.name.trim().toLocaleUpperCase() === printerName.toLocaleUpperCase()
+        );
+        if (!printer) {
+          reject(new Error(
+            `A impressora de rede "${printerName}" não foi encontrada pelo Zebra Browser Print. Confira se ela está conectada à rede SeZ, aparece com esse nome no Browser Print e se o serviço está aberto.`
+          ));
+          return;
+        }
+        resolve(printer);
+      },
+      (error) => reject(new Error(
+        `Não foi possível localizar impressoras no Zebra Browser Print. Confira se o serviço está instalado e aberto. ${getErrorMessage(error)}`
+      )),
+      'printer'
+    );
+  });
+}
+
+async function printPickupLabelOnDevice(
   data: PickupZebraLabelData,
-  qrCodeSvg: SVGSVGElement
+  qrCodeSvg: SVGSVGElement,
+  getPrinter: () => Promise<ZebraPrinterDevice>
 ): Promise<string> {
-  const browserPrint = await loadBrowserPrintSdk();
-  const printer = await getDefaultZebraPrinter(browserPrint);
+  const printer = await getPrinter();
   const zpl = await createPickupLabelZpl(data, qrCodeSvg);
 
   await new Promise<void>((resolve, reject) => {
@@ -311,4 +342,28 @@ export async function printPickupLabelWithZebra(
   });
 
   return printer.name;
+}
+
+export async function printPickupLabelWithZebra(
+  data: PickupZebraLabelData,
+  qrCodeSvg: SVGSVGElement
+): Promise<string> {
+  const browserPrint = await loadBrowserPrintSdk();
+  return printPickupLabelOnDevice(
+    data,
+    qrCodeSvg,
+    () => getDefaultZebraPrinter(browserPrint)
+  );
+}
+
+export async function printPickupLabelWithNetworkZebra(
+  data: PickupZebraLabelData,
+  qrCodeSvg: SVGSVGElement
+): Promise<string> {
+  const browserPrint = await loadBrowserPrintSdk();
+  return printPickupLabelOnDevice(
+    data,
+    qrCodeSvg,
+    () => getNetworkZebraPrinter(browserPrint, 'ZEBRA-ZD')
+  );
 }
