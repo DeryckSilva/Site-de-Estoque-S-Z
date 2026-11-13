@@ -21,7 +21,6 @@ import {
   INITIAL_DELIVERIES,
 } from '../../data/initialData';
 import { TopInventoryTable } from './TopInventoryTable';
-import { BottomLeftOrdersTable } from './BottomLeftOrdersTable';
 import {
   syncMappingToProductionOrders,
   linkBaseOrderToMapping,
@@ -150,7 +149,6 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     actionLabel?: string;
     onAction?: () => void;
   } | null>(null);
-    const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
 
   // Auto save to LocalStorage and sync with Production Orders
   useEffect(() => {
@@ -337,55 +335,6 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     }));
   };
 
-  // -------------------------------------------------------------
-  // Handlers for Orders (Bottom-Left)
-  // -------------------------------------------------------------
-  const handleAddOrder = (newOrderData: Omit<OrderItem, 'id'>) => {
-    const newOrd: OrderItem = {
-      ...newOrderData,
-      id: `ord-${Date.now()}`,
-    };
-    setOrders((prev) => [newOrd, ...prev]);
-    showNotification(`Pedido ${newOrd.numPed} adicionado com sucesso!`);
-  };
-  const handleRefreshOrders = async () => {
-    setIsRefreshingOrders(true);
-    try {
-      const [sheetOrders, attendedNumbers] = await Promise.all([
-        loadOrdersFromGoogleSheet(),
-        loadAttendedOrderNumbers(),
-      ]);
-      setOrders((current) => {
-        const currentByNumber = new Map(current.map((order) => [order.numPed.trim().toLowerCase(), order]));
-        const refreshed = sheetOrders
-          .filter((source) => !attendedNumbers.has(source.numPedido.trim().toLowerCase()))
-          .map((source) => {
-            const existing = currentByNumber.get(source.numPedido.trim().toLowerCase());
-            const importedOrder = {
-              id: `sheet-${source.id}`,
-              numPed: source.numPedido,
-              cliente: source.cliente,
-              quantidade: source.quantidade,
-              itemId: source.mappedItemId,
-              dataEnvio: source.dataEnvio,
-              modeloDesc: `${source.geracao || ''} ${source.modeloVariacao || ''}`.trim(),
-              tipoNegocio: source.tipoNegocio,
-              observacao: source.observacao,
-            };
-            return existing ? { ...existing, ...importedOrder, id: existing.id } : importedOrder;
-          });
-        const manualOrders = current.filter((order) => order.id.startsWith('ord-') && !sheetOrders.some((source) => source.numPedido.toLowerCase() === order.numPed.toLowerCase()));
-        return [...refreshed, ...manualOrders];
-      });
-      showNotification('Pedidos atualizados. Destinações existentes foram preservadas.');
-    } catch (error) {
-      console.error('Falha ao atualizar pedidos:', error);
-      showNotification('Não foi possível atualizar os pedidos. Verifique o acesso às planilhas.');
-    } finally {
-      setIsRefreshingOrders(false);
-    }
-  };
-
   // Link Base Order from Database
   const handleLinkBaseOrder = (baseOrder: BaseOrder, targetItemId: string) => {
     const { orderItem, productionOrder } = linkBaseOrderToMapping(baseOrder);
@@ -423,14 +372,6 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     );
   };
 
-  const handleUpdateOrder = (id: string, updates: Partial<OrderItem>) => {
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...updates } : o)));
-  };
-
-  const handleDeleteOrder = (id: string) => {
-    setOrders((prev) => prev.filter((o) => o.id !== id));
-  };
-
   // -------------------------------------------------------------
   // Handlers for "Sem Pedido" (Bottom-Right Special Box)
   // -------------------------------------------------------------
@@ -455,28 +396,6 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
   // -------------------------------------------------------------
   // Handlers for Equipment Deliveries (Bottom-Right Cards)
   // -------------------------------------------------------------
-  const handleAddDelivery = (cardKey: string, quantidade: number, destinoOuPedido: string, linkedOrderId?: string) => {
-    const linkedOrder = orders.find((order) => order.id === linkedOrderId);
-    if (linkedOrder) {
-      const alreadyDestined = deliveries
-        .filter((delivery) => delivery.linkedOrderId === linkedOrder.id || delivery.linkedOrderNumber?.toLowerCase() === linkedOrder.numPed.toLowerCase())
-        .reduce((sum, delivery) => sum + delivery.quantidade, 0);
-      const remaining = Math.max(0, linkedOrder.quantidade - alreadyDestined);
-      if (quantidade > remaining) return false;
-    }
-    const newDel: EquipmentDeliveryEntry = {
-      id: `del-${Date.now()}`,
-      cardKey,
-      quantidade,
-      destinoOuPedido,
-      linkedOrderId,
-      linkedOrderNumber: linkedOrder?.numPed,
-    };
-    setDeliveries((prev) => [...prev, newDel]);
-    showNotification(`Entrega para produção de ${quantidade} peças registrada!`);
-    return true;
-  };
-
   const handleUpdateDelivery = (id: string, updates: Partial<EquipmentDeliveryEntry>) => {
     setDeliveries((prev) => {
       const current = prev.find((delivery) => delivery.id === id);
@@ -757,25 +676,6 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
         />
       </section>
 
-      {/* 2. TABELA INFERIOR: Pedidos comprometidos */}
-      <section aria-label="Mapeamento Inferior de Produção">
-        <div className="grid grid-cols-1 gap-4 items-start">
-          <div>
-            <BottomLeftOrdersTable
-              orders={orders}
-              equipmentItems={EQUIPMENT_ITEMS}
-              deliveries={deliveries}
-              onAddOrder={handleAddOrder}
-              onUpdateOrder={handleUpdateOrder}
-              onDeleteOrder={handleDeleteOrder}
-              onAddDelivery={handleAddDelivery}
-              onNavigateToProduction={onNavigateToProduction}
-              onRefreshOrders={handleRefreshOrders}
-              isRefreshingOrders={isRefreshingOrders}
-            />
-          </div>
-        </div>
-      </section>
     </div>
   );
 };
