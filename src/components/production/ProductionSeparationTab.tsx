@@ -41,6 +41,14 @@ const COLUMNS: Array<{ key: keyof Omit<ProductionSeparationRow, 'id'>; label: st
   { key: 'responsible', label: 'Responsável' },
 ];
 
+const REPEATED_COLUMNS = COLUMNS.filter(({ key }) => key !== 'serialNumber' && key !== 'ccid');
+
+type DistinctFieldKey = 'serialNumber' | 'ccid';
+
+function isDistinctFieldKey(key: keyof Omit<ProductionSeparationRow, 'id'>): key is DistinctFieldKey {
+  return key === 'serialNumber' || key === 'ccid';
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Não foi possível concluir a operação.';
 }
@@ -48,6 +56,24 @@ function getErrorMessage(error: unknown): string {
 function localDate(): string {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+function parseBatchLines(value: string): string[] {
+  const lines = value.replace(/\r/g, '').split('\n').map((line) => line.trim());
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+function parseTabSeparatedBatch(value: string): Array<{ serial: string; ccid: string }> {
+  const lines = value.replace(/\r/g, '').split('\n');
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  return lines.map((line) => {
+    const columns = line.split('\t');
+    return {
+      serial: (columns[0] ?? '').trim(),
+      ccid: (columns[1] ?? '').trim(),
+    };
+  });
 }
 
 function toRecord(sequence: ProductionSeparationSequence): ProductionSeparationRecord {
@@ -129,6 +155,8 @@ export function ProductionSeparationTab() {
   const [saving, setSaving] = useState(false);
   const [loadingCurrentSequence, setLoadingCurrentSequence] = useState(Boolean(sharedWmsClient));
   const [isDirty, setIsDirty] = useState(false);
+  const [serialBatch, setSerialBatch] = useState('');
+  const [ccidBatch, setCcidBatch] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [notice, setNotice] = useState('');
   const isDirtyRef = useRef(false);
@@ -254,7 +282,8 @@ export function ProductionSeparationTab() {
     }
   }
 
-  function updateRow(rowId: string, key: keyof Omit<ProductionSeparationRow, 'id'>, value: string) {
+  function updateRepeatedField(key: (typeof REPEATED_COLUMNS)[number]['key'], value: string) {
+    if (key === 'orderNumber') setOrderNumber(value);
     setSequence((current) => {
       if (!current) return current;
       if (key === 'orderNumber') {
@@ -266,6 +295,17 @@ export function ProductionSeparationTab() {
       }
       return {
         ...current,
+        rows: current.rows.map((row) => ({ ...row, [key]: value })),
+      };
+    });
+    markDirty(true);
+  }
+
+  function updateDistinctValue(rowId: string, key: DistinctFieldKey, value: string) {
+    setSequence((current) => {
+      if (!current) return current;
+      return {
+        ...current,
         rows: current.rows.map((row) => (row.id === rowId ? { ...row, [key]: value } : row)),
       };
     });
@@ -275,6 +315,49 @@ export function ProductionSeparationTab() {
   function updateClientName(value: string) {
     setSequence((current) => current ? { ...current, clientName: value } : current);
     markDirty(true);
+  }
+
+  function applyBatchValues() {
+    if (!sequence) return;
+    setErrorMessage('');
+    setNotice('');
+
+    const tabSeparatedRows = !ccidBatch.trim() && serialBatch.includes('\t')
+      ? parseTabSeparatedBatch(serialBatch)
+      : null;
+    const serials = tabSeparatedRows
+      ? tabSeparatedRows.map((row) => row.serial)
+      : parseBatchLines(serialBatch);
+    const ccids = tabSeparatedRows
+      ? tabSeparatedRows.map((row) => row.ccid)
+      : parseBatchLines(ccidBatch);
+    if (!serials.length && !ccids.length) {
+      setErrorMessage('Cole pelo menos uma lista de seriais ou chips.');
+      return;
+    }
+    if (serials.length > sequence.rows.length || ccids.length > sequence.rows.length) {
+      setErrorMessage(`A sequência tem ${sequence.rows.length} unidades. Reduza a lista para não ultrapassar essa quantidade.`);
+      return;
+    }
+
+    setSequence((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        rows: current.rows.map((row, index) => ({
+          ...row,
+          ...(index < serials.length ? { serialNumber: serials[index] } : {}),
+          ...(index < ccids.length ? { ccid: ccids[index] } : {}),
+        })),
+      };
+    });
+    markDirty(true);
+    const saveHint = sharedWmsClient
+      ? 'Salve as alterações para compartilhar.'
+      : 'O compartilhamento não está configurado neste site.';
+    setNotice(`Lote aplicado: ${serials.length} seriais e ${ccids.length} chips/CCIDs. ${saveHint}`);
+    setSerialBatch('');
+    setCcidBatch('');
   }
 
   return (
@@ -354,6 +437,62 @@ export function ProductionSeparationTab() {
             </div>
           </div>
 
+          <div className="border-b border-slate-200 p-4">
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold text-slate-800">Campos repetidos em todas as unidades</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Edite cada valor uma vez aqui; a alteração é aplicada a todas as linhas. Serial e CCID são preenchidos por unidade.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {REPEATED_COLUMNS.map((column) => (
+                <label key={column.key} className="block text-xs font-medium text-slate-600">
+                  {column.label}
+                  <input
+                    type="text"
+                    value={sequence.rows[0]?.[column.key] ?? ''}
+                    onChange={(event) => updateRepeatedField(column.key, event.target.value)}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 border-b border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+            <label className="block text-xs font-medium text-slate-700">
+              Seriais — um por linha
+              <textarea
+                rows={4}
+                value={serialBatch}
+                onChange={(event) => setSerialBatch(event.target.value)}
+                placeholder={'SERIAL001\nSERIAL002\nSERIAL003'}
+                className="mt-1 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-700">
+              Chips / CCID — um por linha
+              <textarea
+                rows={4}
+                value={ccidBatch}
+                onChange={(event) => setCcidBatch(event.target.value)}
+                placeholder={'CCID001\nCCID002\nCCID003'}
+                className="mt-1 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={applyBatchValues}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-50"
+            >
+              <ClipboardList className="h-4 w-4" />
+              Aplicar em lote
+            </button>
+            <p className="text-xs text-slate-500 lg:col-span-3">
+              Cole uma lista por área ou duas colunas tabuladas em Seriais. A linha 1 corresponde à unidade 1; linhas vazias limpam essa posição, linhas ausentes preservam os valores restantes e excedentes são recusadas.
+            </p>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-[2200px] border-collapse text-left text-xs">
               <thead className="sticky top-0 bg-slate-100 text-slate-700">
@@ -368,24 +507,33 @@ export function ProductionSeparationTab() {
               <tbody>
                 {sequence.rows.map((row, rowIndex) => (
                   <tr key={row.id} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                    {COLUMNS.map((column) => (
-                      <td key={column.key} className="border-b border-slate-100 px-1.5 py-1">
-                        <input
-                          type="text"
-                          aria-label={`${column.label}, linha ${rowIndex + 1}`}
-                          value={row[column.key]}
-                          onChange={(event) => updateRow(row.id, column.key, event.target.value)}
-                          className="w-full min-w-24 rounded border border-transparent bg-transparent px-1.5 py-1 text-xs text-slate-800 outline-none focus:border-blue-400 focus:bg-white focus:ring-1 focus:ring-blue-100"
-                        />
-                      </td>
-                    ))}
+                    {COLUMNS.map((column) => {
+                      const key = column.key;
+                      return (
+                        <td key={key} className="border-b border-slate-100 px-1.5 py-1">
+                          {isDistinctFieldKey(key) ? (
+                          <input
+                            type="text"
+                            aria-label={`${column.label}, linha ${rowIndex + 1}`}
+                            value={row[key]}
+                            onChange={(event) => updateDistinctValue(row.id, key, event.target.value)}
+                            className="w-full min-w-24 rounded border border-transparent bg-transparent px-1.5 py-1 text-xs text-slate-800 outline-none focus:border-blue-400 focus:bg-white focus:ring-1 focus:ring-blue-100"
+                          />
+                        ) : (
+                          <span className="block min-w-24 px-1.5 py-1 text-xs text-slate-800">
+                            {row[key]}
+                          </span>
+                        )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
-            Os campos podem ser editados diretamente. Serial, CCID e responsável começam em branco, como no script. Gerar outro pedido substitui a sequência atual.
+            Os valores repetidos são editados no painel acima. Serial e CCID podem ser ajustados por linha. Gerar outro pedido substitui a sequência atual.
           </p>
         </section>
       ) : (
