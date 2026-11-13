@@ -7,6 +7,7 @@ import {
   FileText,
   ClipboardList,
   ClipboardMinus,
+  ClipboardCheck,
   BarChart3,
   Warehouse,
   Tag,
@@ -35,6 +36,7 @@ import { ProductionMappingTab } from './components/mapping/ProductionMappingTab'
 import { OrdersDashboardTab } from './components/production/OrdersDashboardTab';
 import { WarehouseWmsTab } from './components/inventory/WarehouseWmsTab';
 import { PreExitTab } from './components/production/PreExitTab';
+import { ProductionSeparationTab } from './components/production/ProductionSeparationTab';
 import { PickupSignatureTab } from './components/production/PickupSignatureTab';
 import { PickupSignaturePage } from './components/production/PickupSignaturePage';
 import { PickupKioskTab } from './components/production/PickupKioskTab';
@@ -262,6 +264,7 @@ const NAV_GROUPS = [
     items: [
       { id: 'ordens_producao', label: 'Painel de Pedidos', icon: ClipboardList },
       { id: 'pre_saida', label: 'Pré-saída', icon: ClipboardMinus },
+      { id: 'separacao_producao', label: 'Separação de pedidos', icon: ClipboardCheck },
       { id: 'assinaturas', label: 'Assinatura da retirada', icon: QrCode },
       { id: 'retirada_interativa', label: 'Retirada pelo tablet', icon: PenLine },
     ],
@@ -1177,6 +1180,8 @@ export default function App() {
         return 'Painel de Pedidos';
       case 'pre_saida':
         return 'Pré-saída';
+      case 'separacao_producao':
+        return 'Separação de pedidos';
       case 'assinaturas':
         return 'Assinatura da retirada';
       case 'retirada_interativa':
@@ -1263,6 +1268,7 @@ export default function App() {
             )}
 
             {currentView === 'pre_saida' && <PreExitTab />}
+            {currentView === 'separacao_producao' && <ProductionSeparationTab />}
             {currentView === 'assinaturas' && <PickupSignatureTab />}
             {currentView === 'retirada_interativa' && <PickupKioskTab />}
 

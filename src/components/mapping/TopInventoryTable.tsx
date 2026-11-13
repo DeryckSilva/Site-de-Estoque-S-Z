@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { CalculatedItemRow, GroupSummary, MappingCustomColumn, MappingLayoutColumn } from '../../types/mapping';
+import { CalculatedItemRow, EquipmentItem, GroupSummary, MappingCustomColumn, MappingLayoutColumn } from '../../types/mapping';
 import { GripVertical, Info, Plus, Trash2 } from 'lucide-react';
 
 interface TopInventoryTableProps {
   rows: CalculatedItemRow[];
+  hiddenItems: EquipmentItem[];
   groupSummaries: Record<string, GroupSummary>;
   painelAbertos: { iscas2G: number; iscas4G: number; tags: number; rastreadores: number };
   onStockChange: (itemId: string, field: 'fisico' | 'quantidade' | 'emManutencao' | 'compraRealizada', value: number) => void;
@@ -18,13 +19,14 @@ interface TopInventoryTableProps {
   onCustomValueChange: (columnId: string, itemId: string, value: number) => void;
   onAddItem: (name: string, targetColumnId: string) => void;
   onDeleteItem: (itemId: string) => void;
+  onRestoreItem: (itemId: string) => void;
 }
 
 export const TopInventoryTable: React.FC<TopInventoryTableProps> = ({
-  rows, groupSummaries, painelAbertos, onStockChange, onItemNameChange,
+  rows, hiddenItems, groupSummaries, painelAbertos, onStockChange, onItemNameChange,
   layoutColumns, customColumns, customColumnValues, onMoveItem,
   onAddLayoutColumn, onDeleteLayoutColumn, onAddCustomColumn, onCustomValueChange,
-  onAddItem, onDeleteItem,
+  onAddItem, onDeleteItem, onRestoreItem,
 }) => {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [newItemName, setNewItemName] = useState('');
@@ -70,17 +72,15 @@ export const TopInventoryTable: React.FC<TopInventoryTableProps> = ({
         <td className={`w-28 border-r border-slate-200 text-center font-mono font-bold ${afterNegative ? 'bg-red-100 text-red-700' : 'bg-blue-50/60 text-blue-900'}`}>{row.saldoPosEntrega}</td>
         {customColumns.map((column) => <td key={column.id} className="w-24 border-r border-slate-200 px-1">{numberInput(row.item.id, 'quantidade', customColumnValues[column.id]?.[row.item.id] || 0, (itemId, _field, value) => onCustomValueChange(column.id, itemId, value))}</td>)}
         <td className="w-7 px-1 text-center">
-          {row.item.id.startsWith('item-') && (
-            <button
-              type="button"
-              onClick={() => onDeleteItem(row.item.id)}
-              title={`Excluir ${row.item.name}`}
-              aria-label={`Excluir ${row.item.name}`}
-              className="rounded p-1 text-red-600 hover:bg-red-50"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onDeleteItem(row.item.id)}
+            title={`Remover ${row.item.name} do quadro`}
+            aria-label={`Remover ${row.item.name} do quadro`}
+            className="rounded p-1 text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </td>
       </tr>
     );
@@ -113,6 +113,27 @@ export const TopInventoryTable: React.FC<TopInventoryTableProps> = ({
           <form onSubmit={(event) => { event.preventDefault(); if (newWindowName.trim()) { onAddLayoutColumn(newWindowName.trim()); setNewWindowName(''); } }} className="flex gap-1"><input value={newWindowName} onChange={(event) => setNewWindowName(event.target.value)} placeholder="Nova janela" className="w-32 rounded border border-slate-300 px-2 py-1.5 text-xs" /><button type="submit" className="rounded bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white">+ Janela</button></form>
         </div>
       </div>
+      {hiddenItems.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-semibold text-slate-700">
+            Itens removidos do quadro ({hiddenItems.length})
+          </summary>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {hiddenItems.map((item) => (
+              <li key={item.id} className="flex items-center justify-between gap-2 py-1.5">
+                <span>{item.name}</span>
+                <button
+                  type="button"
+                  onClick={() => onRestoreItem(item.id)}
+                  className="rounded border border-blue-200 px-2 py-1 font-medium text-blue-700 hover:bg-blue-50"
+                >
+                  Restaurar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <div className="flex flex-wrap gap-3 rounded-lg border border-slate-200 bg-white p-2 text-[11px] text-slate-500"><span>Arraste pelo ícone para outra janela.</span><span>Edite nomes e números diretamente nas células.</span><span>As alterações ficam salvas automaticamente.</span></div>
       <div className="hidden">{groupSummaries && painelAbertos ? ' ' : null}</div>
     </div>

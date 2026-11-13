@@ -45,6 +45,7 @@ import { downloadMappingExcel } from '../../utils/mappingExcelExport';
 
 const STORAGE_KEY = 'kiraso_production_mapping_v1';
 const CHIP_REPORT_STORAGE_KEY = `${STORAGE_KEY}_chips`;
+const HIDDEN_ITEMS_STORAGE_KEY = `${STORAGE_KEY}_hidden_items`;
 const STOCK_DEFAULTS_VERSION = '2026-09-21-balances-01';
 
 const INITIAL_CHIP_REPORT_ROWS: ChipReportRow[] = [
@@ -139,6 +140,15 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     }
   });
 
+  const [hiddenItemIds, setHiddenItemIds] = useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(HIDDEN_ITEMS_STORAGE_KEY) || '[]');
+      return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [layoutColumns, setLayoutColumns] = useState<MappingLayoutColumn[]>(() => {
     try {
       return JSON.parse(localStorage.getItem(`${STORAGE_KEY}_layout`) || 'null') || DEFAULT_LAYOUT_COLUMNS;
@@ -191,6 +201,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       localStorage.setItem(`${STORAGE_KEY}_layout`, JSON.stringify(layoutColumns));
       localStorage.setItem(`${STORAGE_KEY}_columns`, JSON.stringify(customColumns));
       localStorage.setItem(`${STORAGE_KEY}_extra_items`, JSON.stringify(extraItems));
+      localStorage.setItem(HIDDEN_ITEMS_STORAGE_KEY, JSON.stringify(hiddenItemIds));
       localStorage.setItem(CHIP_REPORT_STORAGE_KEY, JSON.stringify(chipReportRows));
 
       // Synchronize with Ordens de Produção ("A atender" panel)
@@ -199,7 +210,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     } catch (err) {
       console.error('Falha ao salvar no localStorage:', err);
     }
-  }, [stockValues, orders, semPedidoEntries, deliveries, itemNameOverrides, layoutColumns, customColumns, customColumnValues, extraItems, chipReportRows]);
+  }, [stockValues, orders, semPedidoEntries, deliveries, itemNameOverrides, layoutColumns, customColumns, customColumnValues, extraItems, hiddenItemIds, chipReportRows]);
 
   useEffect(() => {
     const reloadMappingOrders = () => {
@@ -303,13 +314,18 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     });
   }, [orders, semPedidoEntries, stockValues, itemNameOverrides, extraItems]);
 
+  const visibleCalculatedRows = useMemo(
+    () => calculatedRows.filter((row) => !hiddenItemIds.includes(row.item.id)),
+    [calculatedRows, hiddenItemIds]
+  );
+
   // Group Totals Calculation
   const groupSummaries = useMemo(() => {
     const groups: ItemGroup[] = ['ISCA 2G', 'ISCA 4G', 'TAGS', 'RASTREADORES', 'INDISPONÍVEL'];
     const summaries: Record<string, GroupSummary> = {};
 
     groups.forEach((grp) => {
-      const itemsInGrp = calculatedRows.filter((r) => r.item.group === grp);
+      const itemsInGrp = visibleCalculatedRows.filter((r) => r.item.group === grp);
       summaries[grp] = itemsInGrp.reduce(
         (acc, curr) => ({
           group: grp,
@@ -337,7 +353,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
     });
 
     return summaries;
-  }, [calculatedRows]);
+  }, [visibleCalculatedRows]);
 
   // Small Panel "Pedidos Em Abertos (Painel)"
   const painelAbertos = useMemo(() => {
@@ -490,40 +506,16 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
   };
 
   const handleDeleteItem = (itemId: string) => {
-    const item = extraItems.find((candidate) => candidate.id === itemId);
-    if (!item || !itemId.startsWith('item-')) return;
+    const item = calculatedRows.find((row) => row.item.id === itemId)?.item;
+    if (!item || hiddenItemIds.includes(itemId)) return;
+    if (!window.confirm(`Remover "${item.name}" do quadro? Os pedidos e o histórico serão preservados.`)) return;
 
-    if (orders.some((order) => order.itemId === itemId) ||
-      semPedidoEntries.some((entry) => entry.itemId === itemId)) {
-      showNotification(`Não é possível excluir "${item.name}" porque há compromissos vinculados.`);
-      return;
-    }
+    setHiddenItemIds((current) => current.includes(itemId) ? current : [...current, itemId]);
+    showNotification(`"${item.name}" foi removido do quadro. O histórico foi preservado.`);
+  };
 
-    if (!window.confirm(`Excluir o item "${item.name}"?`)) return;
-
-    setExtraItems((current) => current.filter((candidate) => candidate.id !== itemId));
-    setLayoutColumns((current) => current.map((column) => ({
-      ...column,
-      itemIds: column.itemIds.filter((id) => id !== itemId),
-    })));
-    setStockValues((current) => {
-      const next = { ...current };
-      delete next[itemId];
-      return next;
-    });
-    setItemNameOverrides((current) => {
-      const next = { ...current };
-      delete next[itemId];
-      return next;
-    });
-    setCustomColumnValues((current) => Object.fromEntries(
-      Object.entries(current).map(([columnId, values]) => {
-        const nextValues = { ...values };
-        delete nextValues[itemId];
-        return [columnId, nextValues];
-      })
-    ));
-    showNotification(`Item "${item.name}" excluído.`);
+  const handleRestoreItem = (itemId: string) => {
+    setHiddenItemIds((current) => current.filter((id) => id !== itemId));
   };
 
   const handleChipReportChange = (
@@ -539,7 +531,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
   const handleExportExcel = async () => {
     try {
       await downloadMappingExcel({
-        rows: calculatedRows,
+        rows: visibleCalculatedRows,
         layoutColumns,
         customColumns,
         customColumnValues,
@@ -632,11 +624,11 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
   };
 
   // KPI calculations
-  const totalFisico = calculatedRows.reduce((acc, r) => acc + r.fisico, 0);
-  const totalComPedido = calculatedRows.reduce((acc, r) => acc + r.comPedido, 0);
-  const totalSemPedido = calculatedRows.reduce((acc, r) => acc + r.semPedido, 0);
-  const totalSaldoReal = calculatedRows.reduce((acc, r) => acc + r.saldoReal, 0);
-  const totalPosEntrega = calculatedRows.reduce((acc, r) => acc + r.saldoPosEntrega, 0);
+  const totalFisico = visibleCalculatedRows.reduce((acc, r) => acc + r.fisico, 0);
+  const totalComPedido = visibleCalculatedRows.reduce((acc, r) => acc + r.comPedido, 0);
+  const totalSemPedido = visibleCalculatedRows.reduce((acc, r) => acc + r.semPedido, 0);
+  const totalSaldoReal = visibleCalculatedRows.reduce((acc, r) => acc + r.saldoReal, 0);
+  const totalPosEntrega = visibleCalculatedRows.reduce((acc, r) => acc + r.saldoPosEntrega, 0);
   const chipReportTotals = chipReportRows.reduce((total, row) => ({
     saldoFisico: total.saldoFisico + row.saldoFisico,
     comPedido: total.comPedido + row.comPedido,
@@ -771,7 +763,10 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
       {/* 1. TABELA SUPERIOR: Mapeamento Principal de Estoque */}
       <section aria-label="Tabela Superior de Estoque">
         <TopInventoryTable
-          rows={calculatedRows}
+          rows={visibleCalculatedRows}
+          hiddenItems={calculatedRows
+            .filter((row) => hiddenItemIds.includes(row.item.id))
+            .map((row) => row.item)}
           groupSummaries={groupSummaries}
           painelAbertos={painelAbertos}
           onStockChange={handleStockChange}
@@ -786,6 +781,7 @@ export const ProductionMappingTab: React.FC<ProductionMappingTabProps> = ({
           onCustomValueChange={handleCustomValueChange}
           onAddItem={handleAddItem}
           onDeleteItem={handleDeleteItem}
+          onRestoreItem={handleRestoreItem}
         />
       </section>
 

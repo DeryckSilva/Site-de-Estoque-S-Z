@@ -2,7 +2,9 @@
 
 Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas de equipamentos para produção.
 
-No **Mapeamento de Produção**, itens adicionados manualmente podem ser excluídos e **Baixar Excel** exporta o estoque agrupado junto com o mini-relatório de chips. Os valores do mini-relatório são editáveis e ficam salvos no navegador.
+No **Mapeamento de Produção**, qualquer item pode ser removido do quadro e restaurado depois; pedidos, entregas e estoque histórico são preservados. **Baixar Excel** exporta o estoque visível agrupado junto com o mini-relatório de chips. Os valores do mini-relatório são editáveis e ficam salvos no navegador.
+
+A aba **Separação de pedidos** registra cada pedido e seus equipamentos, seriais, CCIDs/chips, acessórios, responsáveis e datas. O controle é compartilhado em tempo real pelo Supabase configurado para o WMS.
 
 ## Desenvolvimento local
 
@@ -35,6 +37,8 @@ O acesso ao QR é público por UUID: qualquer pessoa com o link pode consultar a
 O script `pickup-signatures.sql` também habilita a lista compartilhada de retiradas e a exclusão permanente de qualquer registro por qualquer visitante, sem login. A exclusão invalida o QR.
 
 Na aba **Retirada pelo tablet**, a Produção pode localizar uma retirada pendente pelo pedido ou cliente e abrir diretamente a página de conferência e assinatura, sem escanear o QR. Os registros precisam ter sido criados previamente na aba **Assinatura da retirada**; após assinados, deixam de aparecer como pendentes no painel do tablet.
+
+Para habilitar **Separação de pedidos**, execute `supabase/separation-control.sql` no SQL Editor do mesmo projeto Supabase configurado para o WMS e publique o site com as variáveis compartilhadas do WMS. **A tabela de separação permite leitura, criação, alteração e exclusão públicas, sem login.** Qualquer visitante com acesso ao site poderá consultar ou modificar os registros; não use dados restritos ou confidenciais neste controle.
 
 ### Impressão direta de etiquetas Zebra
 
