@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { AlertCircle, ClipboardList, LoaderCircle, Search, Save } from 'lucide-react';
+import { AlertCircle, Archive, ClipboardList, LoaderCircle, Search, Save } from 'lucide-react';
 import { sharedWmsClient } from '../../services/sharedWmsStore';
 import {
   createProductionSeparation,
+  finalizeProductionSeparation,
   listProductionSeparations,
   parseRealtimeProductionSeparation,
   saveProductionSeparation,
@@ -18,8 +19,19 @@ import {
   type ProductionSeparationRow,
   type ProductionSeparationSequence,
 } from '../../utils/productionSeparationGenerator';
+import { ProductionSeparationHistoryPanel } from './ProductionSeparationHistoryPanel';
+import { ProductionEquipmentSwapPanel } from './ProductionEquipmentSwapPanel';
+import { ProductionEquipmentSwapHistoryPanel } from './ProductionEquipmentSwapHistoryPanel';
 
 const CURRENT_SEQUENCE_ID = '00000000-0000-4000-8000-000000000001';
+type SeparationSection = 'current' | 'history' | 'swap' | 'swapHistory';
+
+const SECTIONS: Array<{ id: SeparationSection; label: string }> = [
+  { id: 'current', label: 'Separação atual' },
+  { id: 'history', label: 'Histórico' },
+  { id: 'swap', label: 'Troca manual' },
+  { id: 'swapHistory', label: 'Histórico de trocas' },
+];
 
 const COLUMNS: Array<{ key: keyof Omit<ProductionSeparationRow, 'id'>; label: string }> = [
   { key: 'orderNumber', label: 'Nº do pedido' },
@@ -157,6 +169,8 @@ export function ProductionSeparationTab() {
   const [isDirty, setIsDirty] = useState(false);
   const [serialBatch, setSerialBatch] = useState('');
   const [ccidBatch, setCcidBatch] = useState('');
+  const [activeSection, setActiveSection] = useState<SeparationSection>('current');
+  const [finalizing, setFinalizing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [notice, setNotice] = useState('');
   const isDirtyRef = useRef(false);
@@ -229,11 +243,11 @@ export function ProductionSeparationTab() {
     };
   }, []);
 
-  async function persistSequence(candidate: ProductionSeparationSequence) {
+  async function persistSequence(candidate: ProductionSeparationSequence): Promise<SharedProductionSeparation | null> {
     if (!sharedWmsClient) {
       setNotice('Alterações disponíveis apenas nesta tela: o compartilhamento não está configurado.');
       markDirty(true);
-      return;
+      return null;
     }
 
     setSaving(true);
@@ -252,12 +266,44 @@ export function ProductionSeparationTab() {
       setSequence(fromRecord(saved));
       markDirty(false);
       setNotice('Sequência salva e compartilhada com a equipe.');
+      return saved;
     } catch (error) {
       console.error('Falha ao salvar a sequência compartilhada:', error);
       setErrorMessage(`A sequência está visível nesta tela, mas não foi salva no compartilhamento. ${getErrorMessage(error)}`);
+      return null;
     } finally {
       isSavingRef.current = false;
       setSaving(false);
+    }
+  }
+
+  async function handleFinalize() {
+    if (!sequence) return;
+    if (!sharedWmsClient) {
+      setErrorMessage('Configure o Supabase e execute separation-control.sql antes de arquivar separações.');
+      return;
+    }
+
+    setFinalizing(true);
+    setErrorMessage('');
+    try {
+      const current = isDirty || !sharedRecord
+        ? await persistSequence(sequence)
+        : sharedRecord;
+      if (!current) return;
+      await finalizeProductionSeparation(current);
+      setSequence(null);
+      setSharedRecord(null);
+      setOrderNumber('');
+      setSerialBatch('');
+      setCcidBatch('');
+      markDirty(false);
+      setActiveSection('history');
+    } catch (error) {
+      console.error('Falha ao finalizar e arquivar a separação:', error);
+      setErrorMessage(`Não foi possível arquivar a separação. ${getErrorMessage(error)}`);
+    } finally {
+      setFinalizing(false);
     }
   }
 
@@ -362,6 +408,26 @@ export function ProductionSeparationTab() {
 
   return (
     <div className="space-y-5">
+      <nav role="tablist" aria-label="Abas de separação" className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+        {SECTIONS.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            role="tab"
+            aria-selected={activeSection === section.id}
+            onClick={() => setActiveSection(section.id)}
+            className={`rounded-md px-3 py-2 text-sm font-medium ${
+              activeSection === section.id
+                ? 'bg-blue-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            {section.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className={activeSection === 'current' ? 'space-y-5' : 'hidden'}>
       <header className="flex items-start gap-3">
         <div className="rounded-lg bg-blue-50 p-2 text-blue-700">
           <ClipboardList className="h-5 w-5" />
@@ -426,12 +492,23 @@ export function ProductionSeparationTab() {
               {isDirty && sharedWmsClient && (
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={saving || finalizing}
                   onClick={() => void persistSequence(sequence)}
                   className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
                 >
                   {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {saving ? 'Salvando...' : 'Salvar alterações'}
+                </button>
+              )}
+              {sequence && (
+                <button
+                  type="button"
+                  disabled={saving || finalizing}
+                  onClick={() => void handleFinalize()}
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {finalizing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+                  {finalizing ? 'Arquivando...' : 'Finalizar e arquivar'}
                 </button>
               )}
             </div>
@@ -541,6 +618,11 @@ export function ProductionSeparationTab() {
           {loadingCurrentSequence ? 'Carregando a sequência compartilhada...' : 'A sequência do pedido aparecerá aqui após a geração.'}
         </div>
       )}
+      </div>
+
+      {activeSection === 'history' && <ProductionSeparationHistoryPanel />}
+      {activeSection === 'swap' && <ProductionEquipmentSwapPanel />}
+      {activeSection === 'swapHistory' && <ProductionEquipmentSwapHistoryPanel />}
     </div>
   );
 }

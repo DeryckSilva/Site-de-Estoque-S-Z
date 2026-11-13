@@ -4,7 +4,7 @@ Aplicação web para mapeamento de estoque, pedidos comprometidos e entregas de 
 
 No **Mapeamento de Produção**, qualquer item pode ser removido do quadro e restaurado depois; pedidos, entregas e estoque histórico são preservados. **Baixar Excel** exporta o estoque visível agrupado junto com o mini-relatório de chips. Os valores do mini-relatório são editáveis e ficam salvos no navegador.
 
-A aba **Separação de pedidos** lê a aba `Lançamentos` da planilha de pedidos. Basta informar o número do pedido: o sistema aplica as regras do script do Excel e gera uma linha por unidade. Os campos comuns são editados uma vez e repetidos em todas as linhas; seriais e chips/CCIDs são específicos por unidade e podem ser colados em lote, separados por coluna ou juntos em duas colunas copiadas do Excel. A sequência atual é compartilhada pelo Supabase configurado para o WMS; gerar outro pedido substitui a sequência anterior, como o script que limpa a área de separação.
+A aba **Separação de pedidos** lê a aba `Lançamentos` da planilha de pedidos. Basta informar o número do pedido: o sistema aplica as regras do script do Excel e gera uma linha por unidade. Os campos comuns são editados uma vez e repetidos em todas as linhas; seriais e chips/CCIDs são específicos por unidade e podem ser colados em lote. **Finalizar e arquivar** move a sequência para o histórico compartilhado, com filtros e exportação para Excel. As abas de troca manual registram o valor antigo e o novo Serial ou Chip/CCID sem apagar as separações concluídas.
 
 ## Desenvolvimento local
 
@@ -38,7 +38,7 @@ O script `pickup-signatures.sql` também habilita a lista compartilhada de retir
 
 Na aba **Retirada pelo tablet**, a Produção pode localizar uma retirada pendente pelo pedido ou cliente e abrir diretamente a página de conferência e assinatura, sem escanear o QR. Os registros precisam ter sido criados previamente na aba **Assinatura da retirada**; após assinados, deixam de aparecer como pendentes no painel do tablet.
 
-Para habilitar **Separação de pedidos**, execute `supabase/separation-control.sql` no SQL Editor do mesmo projeto Supabase configurado para o WMS e publique o site com as variáveis compartilhadas do WMS. **A tabela de separação permite leitura, criação, alteração e exclusão públicas, sem login.** Qualquer visitante com acesso ao site poderá consultar ou modificar os registros; não use dados restritos ou confidenciais neste controle.
+Para habilitar **Separação de pedidos**, execute ou reexecute `supabase/separation-control.sql` no SQL Editor do mesmo projeto Supabase configurado para o WMS e publique o site com as variáveis compartilhadas do WMS. O SQL cria o histórico imutável, o histórico de trocas e o arquivamento transacional da sequência ativa. **Os dados de separação e troca são públicos, sem login.** Visitantes do site podem consultar os históricos, alterar a sequência ativa e registrar trocas; não use dados restritos ou confidenciais neste controle.
 
 ### Impressão direta de etiquetas Zebra
 

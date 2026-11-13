@@ -46,3 +46,27 @@ export interface SharedProductionSeparation extends ProductionSeparationRecord {
   revision: number;
   updatedAt: string;
 }
+
+export interface CompletedProductionSeparation {
+  id: string;
+  orderNumber: string;
+  clientName: string;
+  finalizedAt: string;
+  data: ProductionSeparationRecord;
+}
+
+export type EquipmentSwapComponent = 'serial' | 'ccid';
+
+export interface ProductionEquipmentSwap {
+  id: string;
+  orderNumber: string;
+  clientName: string;
+  equipmentType: string;
+  component: EquipmentSwapComponent;
+  previousValue: string;
+  newValue: string;
+  responsible: string;
+  swappedOn: string;
+}
+
+export type NewProductionEquipmentSwap = Omit<ProductionEquipmentSwap, 'id'>;
